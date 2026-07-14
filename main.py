@@ -20,7 +20,7 @@ from datetime import date, datetime, time, timedelta
 # V29-Hinweis: Dialogklassen sind zusätzlich in app/gui/dialogs.py vorbereitet.
 # main.py bleibt für diese Version weiterhin eigenständig startfähig.
 APP_NAME = "ImmoVerwaltung"
-APP_VERSION = "5.2.1-exe-logo-ressourcen-fix"
+APP_VERSION = "6.0-enterprise-foundation"
 
 SCHEMA: dict[str, list[str]] = {
     "Objekte": ["Objektname", "Vermieter", "Einheiten", "HV Rechnungen (PDF)", "Baurechnungen (PDF)", "Status", "Notiz", "Vollmachten (PDF)", "Abrechnungen", "Kontoauszüge (PDF)", "Hauskonto (PDF)", "Objektunterlagen (PDF)", "Buchhaltung"],
@@ -8618,7 +8618,7 @@ def benutzer_darf_seite_oeffnen(seite: str) -> bool:
         return True
 
     allgemein = {
-        "Mein Arbeitstag", "Kalender & Planung", "Smart Startseite", "Objektgalerie", "Dashboard", "Verwaltungsleitstand 5.0",
+        "Mein Arbeitstag", "Kalender & Planung", "Smart Startseite", "Objektgalerie", "Enterprise Objekt 360°", "Dokumenten-Center 2.0", "Workflow-Regeln PRO", "Dashboard", "Verwaltungsleitstand 5.0",
         "Globale Suche", "Dokumente", "Akten-Center",
         "Aufgaben", "Fristen", "Arbeitsorganisation PRO",
         "Objektchronik", "Smart Objektakte",
@@ -10062,6 +10062,613 @@ class SmartStartseiteSeite(QWidget):
         )
 
 
+
+def enterprise_dokument_index(objektordner: str = "") -> list[dict[str, str]]:
+    """Indiziert vorhandene Dokumentpfade aus allen Tabellen, ohne Excel zu verändern."""
+    objekt_key = norm_key(objektordner)
+    result: list[dict[str, str]] = []
+
+    for titel, rows in DATA.items():
+        headers = SCHEMA.get(titel, [])
+        document_columns = [
+            index for index, field in enumerate(headers)
+            if any(token in norm_key(field) for token in [
+                "pdf", "dateipfad", "ordnerpfad", "foto", "anlage", "dokument"
+            ])
+        ]
+
+        if not document_columns:
+            continue
+
+        for row_index, row in enumerate(rows, start=1):
+            relation = objektordner_fuer_datensatz(titel, row)
+            if objekt_key and norm_key(relation) != objekt_key:
+                continue
+
+            for col_index in document_columns:
+                value = str(row[col_index] if col_index < len(row) else "").strip()
+                if not value:
+                    continue
+
+                path = Path(value)
+                if not path.is_absolute():
+                    candidates = [
+                        APP_DIR / path,
+                        DOKUMENTE_DIR / path,
+                        AKTEN_DIR / path,
+                    ]
+                    resolved = next((candidate for candidate in candidates if candidate.exists()), APP_DIR / path)
+                else:
+                    resolved = path
+
+                result.append({
+                    "bereich": titel,
+                    "zeile": str(row_index),
+                    "objekt": relation,
+                    "feld": headers[col_index] if col_index < len(headers) else f"Spalte {col_index + 1}",
+                    "titel": path.name or value,
+                    "pfad": str(resolved),
+                    "status": "Vorhanden" if resolved.exists() else "Pfad prüfen",
+                    "typ": resolved.suffix.lower().lstrip(".").upper() or "DATEI",
+                })
+
+    result.sort(key=lambda item: (
+        item["status"] != "Pfad prüfen",
+        item["objekt"],
+        item["bereich"],
+        item["titel"],
+    ))
+    return result
+
+
+def enterprise_workflow_vorschlaege(objektordner: str = "") -> list[dict[str, str]]:
+    """Regelbasierte Workflow-Vorschläge aus bestehenden Daten."""
+    object_key = norm_key(objektordner)
+    result: list[dict[str, str]] = []
+
+    def match(title: str, row: list[Any]) -> bool:
+        return not object_key or norm_key(objektordner_fuer_datensatz(title, row)) == object_key
+
+    for row in DATA.get("Rechnungen", []):
+        if not match("Rechnungen", row):
+            continue
+        status = feldwert("Rechnungen", row, ["Status"])
+        if norm_key(status) not in {"bezahlt", "erledigt", "abgeschlossen"}:
+            result.append({
+                "prioritaet": "Hoch",
+                "regel": "Offene Rechnung",
+                "objekt": objektordner_fuer_datensatz("Rechnungen", row),
+                "titel": f'Rechnung {feldwert("Rechnungen", row, ["Rechnungsnr."])} prüfen',
+                "bereich": "Rechnungen",
+                "aktion": "Aufgabe zur Rechnungsprüfung anlegen",
+                "faellig": feldwert("Rechnungen", row, ["Datum"]),
+            })
+
+    for row in DATA.get("Schäden", []):
+        if not match("Schäden", row):
+            continue
+        status = feldwert("Schäden", row, ["Status"])
+        if norm_key(status) not in {"erledigt", "abgeschlossen", "behoben"}:
+            result.append({
+                "prioritaet": feldwert("Schäden", row, ["Priorität"]) or "Hoch",
+                "regel": "Offener Schaden",
+                "objekt": objektordner_fuer_datensatz("Schäden", row),
+                "titel": feldwert("Schäden", row, ["Schaden"]) or "Schaden bearbeiten",
+                "bereich": "Schäden",
+                "aktion": "Technische Wiedervorlage anlegen",
+                "faellig": feldwert("Schäden", row, ["Datum"]),
+            })
+
+    for item in fristen_pro_status():
+        if object_key and norm_key(item.get("objekt", "")) != object_key:
+            continue
+        if item.get("bewertung") in {"Überfällig", "Dringend", "Bald fällig"}:
+            result.append({
+                "prioritaet": "Kritisch" if item.get("bewertung") == "Überfällig" else "Hoch",
+                "regel": "Fristüberwachung",
+                "objekt": item.get("objekt", ""),
+                "titel": item.get("titel", ""),
+                "bereich": "Fristenmanager PRO",
+                "aktion": f'{item.get("bewertung", "")}: Verantwortlichen informieren',
+                "faellig": item.get("faellig", ""),
+            })
+
+    for warning in plausibilitaetspruefungen(objektordner):
+        result.append({
+            "prioritaet": "Kritisch" if warning.get("ampel") == "🔴" else "Normal",
+            "regel": "Plausibilitätsprüfung",
+            "objekt": warning.get("objekt", ""),
+            "titel": warning.get("hinweis", ""),
+            "bereich": warning.get("bereich", "").split("/")[0],
+            "aktion": warning.get("aktion", "Datensatz prüfen"),
+            "faellig": "",
+        })
+
+    priority_rank = {"Kritisch": 0, "Hoch": 1, "Normal": 2, "Niedrig": 3}
+    result.sort(key=lambda item: (
+        priority_rank.get(item["prioritaet"], 9),
+        datum_sort_key(item["faellig"]),
+        item["objekt"],
+    ))
+    return result
+
+
+def enterprise_aktivitaeten(objektordner: str = "") -> list[list[str]]:
+    """Erzeugt eine kompakte, neueste-zuerst sortierte Aktivitätsliste."""
+    events = objektchronik_rows(objektordner) if objektordner else []
+    if not objektordner:
+        for object_name in alle_objektordner():
+            events.extend(objektchronik_rows(object_name))
+    events.sort(key=lambda item: datum_sort_key(item[0]), reverse=True)
+    return events[:300]
+
+
+class EnterpriseObjekt360Seite(QWidget):
+    """360°-Objektcockpit mit Stammdaten, Finanzen, Vorgängen und Timeline."""
+
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.current_object = ""
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(14)
+
+        title = QLabel("Enterprise Objekt 360°")
+        title.setObjectName("pageTitle")
+        root.addWidget(title)
+
+        subtitle = QLabel(
+            "Zentrale 360°-Sicht auf Stammdaten, Vermietung, Finanzen, Dokumente, Schäden, Aufgaben und Chronik."
+        )
+        subtitle.setObjectName("subTitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        top = QHBoxLayout()
+        self.object_combo = QComboBox()
+        self.object_combo.setEditable(True)
+        self.object_combo.setMinimumWidth(330)
+        self.object_combo.addItems(alle_objektordner())
+        self.object_combo.currentTextChanged.connect(self.refresh)
+
+        refresh_button = QPushButton("Aktualisieren")
+        refresh_button.setObjectName("primaryButton")
+        refresh_button.clicked.connect(self.refresh)
+
+        document_button = QPushButton("Dokumenten-Center")
+        document_button.clicked.connect(lambda: self.nav("Dokumenten-Center 2.0"))
+
+        workflow_button = QPushButton("Workflow-Regeln")
+        workflow_button.clicked.connect(lambda: self.nav("Workflow-Regeln PRO"))
+
+        top.addWidget(QLabel("Objektordner:"))
+        top.addWidget(self.object_combo, 1)
+        top.addWidget(refresh_button)
+        top.addWidget(document_button)
+        top.addWidget(workflow_button)
+        root.addLayout(top)
+
+        self.status_panel = QFrame()
+        self.status_panel.setObjectName("chartPanel")
+        status_layout = QHBoxLayout(self.status_panel)
+        self.status_icon = QLabel("⚪")
+        self.status_icon.setStyleSheet("font-size:48px;")
+        self.status_text = QLabel("Kein Objekt ausgewählt")
+        self.status_text.setObjectName("metricValue")
+        self.status_note = QLabel("")
+        self.status_note.setWordWrap(True)
+
+        text_layout = QVBoxLayout()
+        text_layout.addWidget(self.status_text)
+        text_layout.addWidget(self.status_note)
+        status_layout.addWidget(self.status_icon)
+        status_layout.addLayout(text_layout, 1)
+        root.addWidget(self.status_panel)
+
+        self.cards = QGridLayout()
+        self.cards.setSpacing(12)
+        root.addLayout(self.cards)
+
+        self.tabs = QTabWidget()
+        root.addWidget(self.tabs, 1)
+
+        self.tables: dict[str, QTableWidget] = {}
+        for label, table_name in [
+            ("Stammdaten", "Objekte"),
+            ("Wohnungen", "Wohnungen"),
+            ("Mieter", "Mieter"),
+            ("Rechnungen", "Rechnungen"),
+            ("Betriebskosten", "Betriebskosten"),
+            ("Aufgaben", "Aufgaben"),
+            ("Schäden", "Schäden"),
+            ("Dokumente", "Dokumente"),
+        ]:
+            table = QTableWidget()
+            table.setAlternatingRowColors(True)
+            table.setWordWrap(False)
+            table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+            table.cellDoubleClicked.connect(
+                lambda _row, _column, target=table_name: self.nav(target)
+            )
+            self.tables[table_name] = table
+            self.tabs.addTab(table, label)
+
+        self.timeline_table = QTableWidget()
+        self.timeline_table.setColumnCount(5)
+        self.timeline_table.setHorizontalHeaderLabels(
+            ["Datum", "Bereich", "Ereignis", "Status", "Objektordner"]
+        )
+        self.timeline_table.setAlternatingRowColors(True)
+        self.timeline_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.timeline_table.cellDoubleClicked.connect(self.open_timeline_area)
+        self.tabs.addTab(self.timeline_table, "Timeline")
+
+        self.refresh()
+
+    @staticmethod
+    def _card(title: str, value: str, icon: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("metricCard")
+        card.setMinimumHeight(92)
+        layout = QVBoxLayout(card)
+        label = QLabel(f"{icon}  {title}")
+        label.setObjectName("metricTitle")
+        value_label = QLabel(value)
+        value_label.setObjectName("metricValue")
+        value_label.setWordWrap(True)
+        layout.addWidget(label)
+        layout.addWidget(value_label)
+        return card
+
+    def refresh(self) -> None:
+        object_name = self.object_combo.currentText().strip()
+        self.current_object = object_name
+        if not object_name:
+            return
+
+        status = smart_objekt_status(object_name)
+        health = objekt_gesundheitsindex(object_name)
+
+        self.status_icon.setText(str(health["ampel"]))
+        self.status_text.setText(
+            f'{object_name} · {health["punkte"]} % · {health["bewertung"]}'
+        )
+        messages = list(status.get("hinweise", []))
+        messages.extend(health.get("gruende", []))
+        self.status_note.setText(" · ".join(messages) if messages else "Keine kritischen Auffälligkeiten.")
+
+        while self.cards.count():
+            item = self.cards.takeAt(0)
+            if item is not None and item.widget() is not None:
+                item.widget().deleteLater()
+
+        card_values = [
+            ("Wohnungen", str(status["wohnungen"]), "🏠"),
+            ("Mieter", str(status["mieter"]), "👥"),
+            ("Leerstand", str(status["freie_wohnungen"]), "🚪"),
+            ("Offene Aufgaben", str(status["offene_aufgaben"]), "🗂"),
+            ("Offene Rechnungen", str(status["offene_rechnungen"]), "🧾"),
+            ("Offene Schäden", str(status["offene_schaeden"]), "⚠"),
+            ("Dokumente", str(status["dokumente"]), "📄"),
+            ("Jahresmiete", euro(float(status["jahresmiete"])), "💶"),
+            ("Objektsaldo", euro(float(status["saldo"])), "Σ"),
+        ]
+        for index, values in enumerate(card_values):
+            self.cards.addWidget(self._card(*values), index // 3, index % 3)
+
+        for table_name, table in self.tables.items():
+            self._fill_table(table, table_name, object_name)
+
+        timeline = objektchronik_rows(object_name)
+        self.timeline_table.setRowCount(len(timeline))
+        for row_index, row in enumerate(timeline):
+            for col_index, value in enumerate(row):
+                self.timeline_table.setItem(
+                    row_index, col_index, QTableWidgetItem(str(value))
+                )
+        for col_index, width in enumerate([120, 190, 650, 150, 260]):
+            self.timeline_table.setColumnWidth(col_index, width)
+
+    @staticmethod
+    def _fill_table(table: QTableWidget, title: str, object_name: str) -> None:
+        rows = [
+            row for row in DATA.get(title, [])
+            if norm_key(objektordner_fuer_datensatz(title, row)) == norm_key(object_name)
+        ]
+        headers = SCHEMA.get(title, [])
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+        table.setRowCount(len(rows))
+        for row_index, row in enumerate(rows):
+            for col_index in range(len(headers)):
+                value = row[col_index] if col_index < len(row) else ""
+                table.setItem(row_index, col_index, QTableWidgetItem(str(value)))
+        for col_index in range(len(headers)):
+            table.setColumnWidth(col_index, 155)
+
+    def open_timeline_area(self, row: int, _column: int) -> None:
+        item = self.timeline_table.item(row, 1)
+        if item is not None and item.text().strip():
+            self.nav(item.text().strip())
+
+
+class DokumentenCenter2Seite(QWidget):
+    """Dokumentenindex über alle bestehenden Tabellen und PDF-Felder."""
+
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.rows: list[dict[str, str]] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(14)
+
+        title = QLabel("Dokumenten-Center 2.0")
+        title.setObjectName("pageTitle")
+        root.addWidget(title)
+
+        subtitle = QLabel(
+            "Zentrale Suche und Statusprüfung für PDF-, Bild- und Dateipfade aus allen bestehenden Tabellen."
+        )
+        subtitle.setObjectName("subTitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        top = QHBoxLayout()
+        self.object_filter = QComboBox()
+        self.object_filter.addItem("Alle Objektordner")
+        self.object_filter.addItems(alle_objektordner())
+        self.object_filter.currentTextChanged.connect(self.refresh)
+
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Titel, Bereich, Feld, Dateityp oder Pfad suchen ...")
+        self.search.textChanged.connect(self.refresh)
+
+        self.status_filter = QComboBox()
+        self.status_filter.addItems(["Alle Status", "Vorhanden", "Pfad prüfen"])
+        self.status_filter.currentTextChanged.connect(self.refresh)
+
+        refresh_button = QPushButton("Index aktualisieren")
+        refresh_button.setObjectName("primaryButton")
+        refresh_button.clicked.connect(self.refresh)
+
+        top.addWidget(QLabel("Objektordner:"))
+        top.addWidget(self.object_filter)
+        top.addWidget(self.search, 1)
+        top.addWidget(self.status_filter)
+        top.addWidget(refresh_button)
+        root.addLayout(top)
+
+        self.summary = QLabel("")
+        self.summary.setObjectName("metricTitle")
+        root.addWidget(self.summary)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels(
+            ["Status", "Typ", "Titel", "Bereich", "Objektordner", "Feld", "Zeile", "Pfad"]
+        )
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.table.cellDoubleClicked.connect(self.open_document)
+        root.addWidget(self.table, 1)
+
+        actions = QHBoxLayout()
+        open_button = QPushButton("Ausgewählte Datei öffnen")
+        open_button.setObjectName("primaryButton")
+        open_button.clicked.connect(self.open_selected)
+        area_button = QPushButton("Quellbereich öffnen")
+        area_button.clicked.connect(self.open_source_area)
+        actions.addWidget(open_button)
+        actions.addWidget(area_button)
+        actions.addStretch()
+        root.addLayout(actions)
+
+        self.refresh()
+
+    def refresh(self) -> None:
+        selected = self.object_filter.currentText().strip()
+        object_name = "" if selected == "Alle Objektordner" else selected
+        rows = enterprise_dokument_index(object_name)
+
+        query = self.search.text().strip().lower()
+        if query:
+            rows = [
+                item for item in rows
+                if query in " ".join(item.values()).lower()
+            ]
+
+        status = self.status_filter.currentText()
+        if status != "Alle Status":
+            rows = [item for item in rows if item["status"] == status]
+
+        self.rows = rows
+        existing = sum(1 for item in rows if item["status"] == "Vorhanden")
+        missing = len(rows) - existing
+        self.summary.setText(
+            f"{len(rows)} Dokumentverweise · {existing} vorhanden · {missing} Pfad/Paket prüfen"
+        )
+
+        self.table.setRowCount(len(rows))
+        keys = ["status", "typ", "titel", "bereich", "objekt", "feld", "zeile", "pfad"]
+        for row_index, item in enumerate(rows):
+            for col_index, key in enumerate(keys):
+                self.table.setItem(
+                    row_index, col_index, QTableWidgetItem(item.get(key, ""))
+                )
+        for col_index, width in enumerate([110, 80, 280, 190, 240, 210, 70, 700]):
+            self.table.setColumnWidth(col_index, width)
+
+    def selected_row(self) -> dict[str, str] | None:
+        index = self.table.currentRow()
+        if 0 <= index < len(self.rows):
+            return self.rows[index]
+        return None
+
+    def open_document(self, row: int, _column: int) -> None:
+        if 0 <= row < len(self.rows):
+            path = Path(self.rows[row]["pfad"])
+            if path.exists():
+                system_datei_oeffnen(str(path))
+            else:
+                QMessageBox.warning(self, "Dokument", f"Datei nicht gefunden:\n{path}")
+
+    def open_selected(self) -> None:
+        item = self.selected_row()
+        if item is not None:
+            path = Path(item["pfad"])
+            if path.exists():
+                system_datei_oeffnen(str(path))
+            else:
+                QMessageBox.warning(self, "Dokument", f"Datei nicht gefunden:\n{path}")
+
+    def open_source_area(self) -> None:
+        item = self.selected_row()
+        if item is not None and item["bereich"]:
+            self.nav(item["bereich"])
+
+
+class WorkflowRegelnProSeite(QWidget):
+    """Regelbasierte Vorschläge mit optionaler Übernahme als bestehende Aufgabe."""
+
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.rows: list[dict[str, str]] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(14)
+
+        title = QLabel("Workflow-Regeln PRO")
+        title.setObjectName("pageTitle")
+        root.addWidget(title)
+
+        subtitle = QLabel(
+            "Prüft offene Rechnungen, Schäden, Fristen und Plausibilitäten und schlägt konkrete Arbeitsschritte vor."
+        )
+        subtitle.setObjectName("subTitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        top = QHBoxLayout()
+        self.object_filter = QComboBox()
+        self.object_filter.addItem("Alle Objektordner")
+        self.object_filter.addItems(alle_objektordner())
+        self.object_filter.currentTextChanged.connect(self.refresh)
+
+        self.priority_filter = QComboBox()
+        self.priority_filter.addItems(["Alle Prioritäten", "Kritisch", "Hoch", "Normal", "Niedrig"])
+        self.priority_filter.currentTextChanged.connect(self.refresh)
+
+        refresh_button = QPushButton("Regeln ausführen")
+        refresh_button.setObjectName("primaryButton")
+        refresh_button.clicked.connect(self.refresh)
+
+        create_button = QPushButton("Als Aufgabe übernehmen")
+        create_button.clicked.connect(self.create_task)
+
+        top.addWidget(QLabel("Objektordner:"))
+        top.addWidget(self.object_filter)
+        top.addWidget(QLabel("Priorität:"))
+        top.addWidget(self.priority_filter)
+        top.addWidget(refresh_button)
+        top.addWidget(create_button)
+        top.addStretch()
+        root.addLayout(top)
+
+        self.summary = QLabel("")
+        self.summary.setObjectName("metricTitle")
+        root.addWidget(self.summary)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels(
+            ["Priorität", "Regel", "Objektordner", "Titel", "Bereich", "Aktion", "Fällig"]
+        )
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.table.cellDoubleClicked.connect(self.open_area)
+        root.addWidget(self.table, 1)
+
+        self.refresh()
+
+    def refresh(self) -> None:
+        selected = self.object_filter.currentText().strip()
+        object_name = "" if selected == "Alle Objektordner" else selected
+        rows = enterprise_workflow_vorschlaege(object_name)
+
+        priority = self.priority_filter.currentText()
+        if priority != "Alle Prioritäten":
+            rows = [item for item in rows if item["prioritaet"] == priority]
+
+        self.rows = rows
+        critical = sum(1 for item in rows if item["prioritaet"] == "Kritisch")
+        high = sum(1 for item in rows if item["prioritaet"] == "Hoch")
+        self.summary.setText(
+            f"{len(rows)} Vorschläge · {critical} kritisch · {high} hoch"
+        )
+
+        self.table.setRowCount(len(rows))
+        keys = ["prioritaet", "regel", "objekt", "titel", "bereich", "aktion", "faellig"]
+        for row_index, item in enumerate(rows):
+            for col_index, key in enumerate(keys):
+                self.table.setItem(
+                    row_index, col_index, QTableWidgetItem(item.get(key, ""))
+                )
+        for col_index, width in enumerate([110, 190, 240, 420, 190, 420, 110]):
+            self.table.setColumnWidth(col_index, width)
+
+    def selected_row(self) -> dict[str, str] | None:
+        index = self.table.currentRow()
+        return self.rows[index] if 0 <= index < len(self.rows) else None
+
+    def create_task(self) -> None:
+        item = self.selected_row()
+        if item is None:
+            QMessageBox.information(self, "Workflow", "Bitte einen Vorschlag auswählen.")
+            return
+
+        values = ["" for _ in SCHEMA["Aufgaben"]]
+        defaults = {
+            "Aufgabe": item["titel"],
+            "Bereich": item["bereich"],
+            "Objekt": item["objekt"],
+            "Objektordner": item["objekt"],
+            "Verantwortlich": aktueller_mitarbeitername(),
+            "Priorität": item["prioritaet"],
+            "Fällig am": item["faellig"],
+            "Status": "Neu",
+            "Notiz": item["aktion"],
+        }
+        for index, field in enumerate(SCHEMA["Aufgaben"]):
+            if field in defaults:
+                values[index] = defaults[field]
+
+        dialog = EingabeDialog("Workflow-Aufgabe übernehmen", SCHEMA["Aufgaben"], values)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            DATA["Aufgaben"].append(dialog.values())
+            speichere_tabelle("Aufgaben")
+            aktivitaet_protokollieren(
+                "Workflow-Regeln PRO",
+                "Aufgabe erzeugt",
+                beschreibung=item["titel"],
+            )
+            QMessageBox.information(self, "Workflow", "Aufgabe wurde übernommen.")
+            self.refresh()
+
+    def open_area(self, row: int, _column: int) -> None:
+        if 0 <= row < len(self.rows):
+            target = self.rows[row].get("bereich", "")
+            if target:
+                self.nav(target)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -10206,6 +10813,9 @@ class MainWindow(QMainWindow):
         self.add_page("Dashboard", Dashboard(self.navigate))
         self.add_page("Smart Startseite", SmartStartseiteSeite(self.navigate))
         self.add_page("Objektgalerie", ObjektGalerieSeite(self.navigate))
+        self.add_page("Enterprise Objekt 360°", EnterpriseObjekt360Seite(self.navigate))
+        self.add_page("Dokumenten-Center 2.0", DokumentenCenter2Seite(self.navigate))
+        self.add_page("Workflow-Regeln PRO", WorkflowRegelnProSeite(self.navigate))
         self.add_page("Verwaltungsleitstand 5.0", VerwaltungsleitstandSeite(self.navigate))
         self.add_page("Berichte & Export PRO", BerichteExportProSeite(self.navigate))
         self.add_page("System-Center PRO", SystemCenterProSeite(self.navigate))
@@ -10243,7 +10853,7 @@ class MainWindow(QMainWindow):
             ]),
             ("VERWALTUNG", [
                 "Objekte", "Wohnungen", "Mieter", "Mietverträge",
-                "Objektgalerie", "Smart Objektakte", "Objektchronik",
+                "Objektgalerie", "Enterprise Objekt 360°", "Smart Objektakte", "Objektchronik",
             ]),
             ("FINANZEN", [
                 "Rechnungen", "Betriebskosten", "Buchhaltung",
@@ -10253,7 +10863,7 @@ class MainWindow(QMainWindow):
             ("ORGANISATION", [
                 "Arbeitsorganisation PRO", "Fristenmanager PRO",
                 "Workflow-Center PRO", "Jahresprüfung PRO",
-                "Dokumente", "Akten-Center", "Globale Suche",
+                "Dokumente", "Dokumenten-Center 2.0", "Akten-Center", "Globale Suche", "Workflow-Regeln PRO",
             ]),
             ("AUSWERTUNG & SYSTEM", [
                 "Verwaltungs-Cockpit", "Objekt-Cockpit",
@@ -10336,6 +10946,9 @@ class MainWindow(QMainWindow):
         icons = {
             "Smart Startseite": "✨",
             "Objektgalerie": "🗃",
+            "Enterprise Objekt 360°": "🌐",
+            "Dokumenten-Center 2.0": "📚",
+            "Workflow-Regeln PRO": "⚙",
             "Dashboard": "⌂",
             "Verwaltungsleitstand 5.0": "🚀",
             "Berichte & Export PRO": "📊",
@@ -10442,6 +11055,9 @@ class MainWindow(QMainWindow):
         commands = [
             "Smart Startseite",
             "Objektgalerie",
+            "Enterprise Objekt 360°",
+            "Dokumenten-Center 2.0",
+            "Workflow-Regeln PRO",
             "Dashboard",
             "Verwaltungsleitstand 5.0",
             "Mein Arbeitstag",

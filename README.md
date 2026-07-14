@@ -1,5 +1,7 @@
 # ImmoVerwaltung
 
+**Aktueller Entwicklungsstand: Version 6.0 Enterprise Foundation**
+
 Windows-Desktopanwendung für Immobilien-, Mieter-, Dokumenten-, Aufgaben-, Fristen- und Finanzverwaltung.
 
 ## Schwerpunkte
@@ -56,3 +58,8 @@ Weitere Hinweise befinden sich in `docs/`, im Benutzerhandbuch und im `CHANGELOG
 ## Lizenz
 
 Proprietär. Alle Rechte vorbehalten. Siehe `LICENSE`.
+
+
+## Version 6.0
+
+Enterprise Objekt 360°, Dokumenten-Center 2.0 und Workflow-Regeln PRO.

@@ -1,5 +1,14 @@
 # Changelog
 
+## 6.0.0 – Enterprise Foundation
+
+- Enterprise Objekt 360° ergänzt
+- Dokumenten-Center 2.0 ergänzt
+- Workflow-Regeln PRO ergänzt
+- kontrollierte Aufgabenübernahme aus Workflow-Vorschlägen
+- Excelstruktur unverändert
+
+
 ## 3.3.1 – Funktionscheck Fix mit Testdaten
 - Dashboard-Platzhaltertabs funktional gemacht.
 - Objekt-Cockpit Dokumente-Tab ergänzt.
