@@ -1,0 +1,12 @@
+Version 2.0.3 Verwaltungsakte Optimierung
+
+Bestehende Excel-Dateien wurden nicht verändert.
+Neue Excel-Dateien:
+versorger.xlsx
+fristen.xlsx
+aufgaben.xlsx
+schaeden.xlsx
+schluessel.xlsx
+
+Bereits vorhandene neue Dateien übersprungen:
+

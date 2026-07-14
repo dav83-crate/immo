@@ -1,0 +1,11 @@
+{
+    "modus": "netzwerk",
+    "basis_pfad": "\\\\PC-MUELLER\\Immobilienverwaltung",
+    "daten_pfad": "daten",
+    "dokumente_pfad": "dokumente\\pdf",
+    "exports_pfad": "exports",
+    "akten_pfad": "akten",
+    "theme": "hell",
+    "version": "V32-Testphase",
+    "feedback_pfad": "feedback"
+}

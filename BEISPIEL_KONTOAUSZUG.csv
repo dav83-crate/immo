@@ -1,0 +1,5 @@
+Datum;Buchungstext;Auftraggeber;Verwendungszweck;Betrag
+01.07.2026;SEPA Gutschrift;Max Mustermann;Miete Juli Musterstraße 10 Wohnung 1;850,00
+02.07.2026;SEPA Gutschrift;Erika Beispiel;Mietzahlung Bahnhofstraße 5 Wohnung 1;760,00
+03.07.2026;SEPA Gutschrift;Jonas Testmann;Warmmiete Bahnhofstraße 5 Wohnung 2;990,00
+04.07.2026;Kartenzahlung;Baumarkt Test;Material Reparatur;-86,50

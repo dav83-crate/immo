@@ -1,0 +1,40 @@
+ImmoVerwaltung 3.3 Testdaten Vollumfang
+=======================================
+
+Verarbeitete XLSX-Dateien:
+- abwasser.xlsx: 10 Spalten, 5 Zeilen
+- aktenstruktur.xlsx: 7 Spalten, 5 Zeilen
+- aufgaben.xlsx: 13 Spalten, 8 Zeilen
+- betriebskosten.xlsx: 21 Spalten, 12 Zeilen
+- brand_arbeitsschutz.xlsx: 9 Spalten, 5 Zeilen
+- dienstleister.xlsx: 6 Spalten, 5 Zeilen
+- dokumente.xlsx: 6 Spalten, 5 Zeilen
+- email.xlsx: 8 Spalten, 5 Zeilen
+- ereignisprotokoll.xlsx: 10 Spalten, 8 Zeilen
+- fristen.xlsx: 13 Spalten, 8 Zeilen
+- grundsteuer.xlsx: 8 Spalten, 5 Zeilen
+- hv_rechnungen.xlsx: 13 Spalten, 10 Zeilen
+- mahnwesen.xlsx: 6 Spalten, 5 Zeilen
+- mieter.xlsx: 18 Spalten, 5 Zeilen
+- mietvertraege.xlsx: 8 Spalten, 5 Zeilen
+- mitarbeiter.xlsx: 5 Spalten, 5 Zeilen
+- objekte.xlsx: 13 Spalten, 4 Zeilen
+- rechnungen.xlsx: 8 Spalten, 10 Zeilen
+- schaeden.xlsx: 16 Spalten, 8 Zeilen
+- schluessel.xlsx: 12 Spalten, 5 Zeilen
+- schornsteinfeger.xlsx: 9 Spalten, 5 Zeilen
+- stundennachweise.xlsx: 6 Spalten, 5 Zeilen
+- uebergabeprotokolle.xlsx: 12 Spalten, 5 Zeilen
+- vermieterauskunft.xlsx: 8 Spalten, 5 Zeilen
+- versicherungen.xlsx: 9 Spalten, 5 Zeilen
+- versorger.xlsx: 17 Spalten, 5 Zeilen
+- wichtige_vertraege.xlsx: 9 Spalten, 5 Zeilen
+- wohnungen.xlsx: 6 Spalten, 6 Zeilen
+- wohnungsgeberauskunft.xlsx: 11 Spalten, 5 Zeilen
+- zahlungen.xlsx: 6 Spalten, 20 Zeilen
+- zahlungspruefung.xlsx: 9 Spalten, 5 Zeilen
+
+Fehler:
+- keine
+
+Nur zum Testen verwenden.

@@ -1,0 +1,18 @@
+Funktionscheck Version 3.3.1
+===========================
+
+Behoben:
+- Dashboard-Analysebereiche waren teilweise nur Platzhalter.
+- Objekt-Cockpit hatte keinen sichtbaren Dokumente-Tab.
+- Navigation zu nicht vorhandenen Bereichen gab keine Rückmeldung.
+
+Jetzt funktional:
+- Objektanalyse
+- Vermieteranalyse
+- Mieteranalyse
+- Finanzanalyse
+- Diagramme
+- Berichte/Export-Verweise
+- Objekt-Cockpit Dokumente
+
+Keine Excel-Strukturänderung.
