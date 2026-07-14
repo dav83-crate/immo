@@ -63,3 +63,11 @@ Proprietär. Alle Rechte vorbehalten. Siehe `LICENSE`.
 ## Version 6.0
 
 Enterprise Objekt 360°, Dokumenten-Center 2.0 und Workflow-Regeln PRO.
+
+⚠️ Copyright Notice
+
+Dieses Repository dient ausschließlich der Dokumentation und Entwicklung.
+
+Das Kopieren, Verwenden oder Weiterentwickeln des Quellcodes außerhalb einer ausdrücklich schriftlich erteilten Genehmigung ist nicht gestattet.
+
+Alle Rechte verbleiben bei David Dornheim.
