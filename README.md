@@ -1,6 +1,6 @@
 # ImmoVerwaltung
 
-**Aktueller Entwicklungsstand: Version 6.0 Enterprise Foundation**
+**Aktueller Entwicklungsstand: Version 6.0 Enterprise Foundation mit dazugehöriger Mitarbeiterapp für Zeiterfassung und Schädensmeldung**
 
 Windows-Desktopanwendung für Immobilien-, Mieter-, Dokumenten-, Aufgaben-, Fristen- und Finanzverwaltung.
 
