@@ -6,10 +6,6 @@ Neu:
 - eingeloggter Benutzer wird oben angezeigt
 
 Standard-Testzugänge:
-- julia / julia123
-- franzi / franzi123
-- robert / robert123
-- ralf / ralf123
 - admin / admin123
 
 ImmoVerwaltung 3.7 – Belegscanner PRO
