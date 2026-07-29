@@ -1,6 +1,6 @@
-
+import hashlib, zipfile
 from openpyxl.worksheet.worksheet import Worksheet
-import sys, os, shutil, json, subprocess, csv, re
+import sys, os, shutil, json, subprocess, csv, re, html
 from pathlib import Path
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
@@ -8,44 +8,48 @@ try:
     from pypdf import PdfReader
 except ModuleNotFoundError:
     PdfReader = None
-from PySide6.QtCore import Qt, QDate, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
 from PySide6.QtGui import QBrush, QPen, QPixmap, QTextDocument, QKeySequence, QShortcut, QIcon
-from PySide6.QtWidgets import *
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCalendarWidget, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame,
+    QGraphicsOpacityEffect, QGraphicsScene, QGraphicsView, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
+    QListWidget, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QTabWidget, QTableWidget,
+    QTableWidgetItem, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,)
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-from PySide6.QtWidgets import QPushButton
 from typing import Any
 from datetime import date, datetime, time, timedelta
 
 
-# V29-Hinweis: Dialogklassen sind zusätzlich in app/gui/dialogs.py vorbereitet.
-# main.py bleibt für diese Version weiterhin eigenständig startfähig.
+# Bereinigte Einzeldatei-Version: veraltete, nicht mehr erreichbare Übergangsbausteine wurden entfernt.
 APP_NAME = "ImmoVerwaltung"
-APP_VERSION = "6.0-enterprise-foundation"
+APP_VERSION = "11.0"
 
 SCHEMA: dict[str, list[str]] = {
-    "Objekte": ["Objektname", "Vermieter", "Einheiten", "HV Rechnungen (PDF)", "Baurechnungen (PDF)", "Status", "Notiz", "Vollmachten (PDF)", "Abrechnungen", "Kontoauszüge (PDF)", "Hauskonto (PDF)", "Objektunterlagen (PDF)", "Buchhaltung"],
-    "Betriebskosten": ["Anschlussnutzer", "Zählernummer", "Geschoss", "Unterlagen (PDF)", "BK Art", "Objektordner", "Wohnungsordner", "Kundennummer", "Vertragsnummer", "Versorger", "Zählernummer Zusatz", "Abschlag monatlich", "Jahresverbrauch", "Abrechnungsjahr", "Fällig am", "Vertragsbeginn", "Vertragsende", "SEPA", "Rechnung PDF", "Vertrag PDF", "Bemerkungen"],
-    "Wohnungen": ["Objekt", "Wohnung", "Etage", "Größe qm", "Zimmer", "Status", "Objektordner", "Wohnungsordner"],
-    "Mieter": ["Mieter", "Mieter-Status", "Ort", "Wohnfläche", "Telefonnummer", "Mietbeginn", "Mietende", "Miete", "Kaltmiete", "BK monatlich", "Heizkosten", "BK jährlich", "Ist-BK jährlich", "Nachzahlung", "Guthaben", "BK-Status", "BK (PDF)", "HK (PDF)", "Objektordner", "Wohnungsordner"],
-    "Mietverträge": ["Mieter", "Wohnung", "Beginn", "Ende", "Kaltmiete", "Nebenkosten", "Kaution", "Status", "Mietvertrag (PDF)"],
+    "Objekte": ["Objektname", "Vermieter", "Einheiten", "HV Rechnungen (PDF)", "Baurechnungen (PDF)", "Status", "Notiz", "Vollmachten (PDF)", "Abrechnungen", "Kontoauszüge (PDF)", "Hauskonto (PDF)", "Objektunterlagen (PDF)", "Buchhaltung", "Objektordner", "Vermieter E-Mail-Adresse", "Baujahr", "Grundstücksfläche", "Grundrisse (PDF)", "HV-Verträge (PDF)"],
+    "Betriebskosten": ["Anschlussnutzer", "Zählernummer", "Geschoss", "Unterlagen (PDF)", "BK Art", "Objektordner", "Wohnungsordner", "Kundennummer", "Vertragsnummer", "Versorger", "Zählernummer Zusatz", "Abschlag monatlich", "Jahresverbrauch", "Abrechnungsjahr", "Fällig am", "Vertragsbeginn", "Vertragsende", "SEPA", "Rechnung PDF", "Vertrag PDF", "Bemerkungen", "Objektordner"],
+    "Wohnungen": ["Objekt", "Wohnung", "Etage", "Größe qm", "Zimmer", "Status", "Objektordner", "Wohnungsordner", "Objektordner"],
+    "Mieter": ["Mieter", "Mieter-Status", "Ort", "Wohnfläche", "Telefonnummer", "Mietbeginn", "Mietende", "Miete", "Kaltmiete", "BK monatlich", "Heizkosten", "BK jährlich", "Ist-BK jährlich", "Nachzahlung", "Guthaben", "BK-Status", "BK (PDF)", "HK (PDF)", "Objektordner", "Wohnungsordner", "E-Mail-Adresse"],
+    "Mietverträge": ["Mieter", "Wohnung", "Beginn", "Ende", "Kaltmiete", "Nebenkosten", "Kaution", "Status", "Mietvertrag (PDF)", "Objektordner"],
     "Zahlungen": ["Datum", "Name/Quelle", "Betrag", "Verwendungszweck", "IBAN", "Status", "Kostenart", "Rechnungsjahr", "Fälligkeit", "Rechnung (PDF)", "Objektordner" ],
     "Zahlungsprüfung": ["Monat", "Mieter", "Wohnung", "Soll", "Gezahlt", "Differenz", "Status", "Zuordnung", "Treffer", "Objektordner"],
     "Mahnwesen": ["Mieter", "Wohnung", "Offener Betrag", "Mahnstufe", "Status", "Letzte Aktion", "Objektordner"],
     "Mitarbeiter": ["Name", "Bereich", "E-Mail", "Telefon", "Status"],
     "Stundennachweise": ["Mitarbeiter", "Datum", "Objekt", "Tätigkeit", "Stunden", "Status"],
-    "Dienstleister": ["Firma", "Gewerk", "Ansprechpartner", "Telefon", "E-Mail", "Status"],
-    "Rechnungen": ["Rechnungsnr.", "Dienstleister", "Objekt", "Datum", "Netto", "MwSt.", "Brutto", "Status"],
-    "Dokumente": ["Titel", "Typ", "Bezug", "Datum", "Status", "Dateipfad"],
-    "Aktenstruktur": ["Objekt / Adresse", "Eigentümer", "Ordnerfarbe", "Ordnerart", "Unterlagen / Register", "Status", "Ordnerpfad"],    "Grundsteuer": ["Objekt", "Steuernummer", "Jahr", "Betrag", "Fälligkeit", "Bescheid (PDF)", "Status", "Notiz"],
-    "Versicherungen": ["Objekt", "Versicherung", "Versicherungsnummer", "Gesellschaft", "Beitrag", "Fälligkeit", "Status", "Vertrag (PDF)", "Notiz"],    "Brand- und Arbeitsschutz": ["Objekt", "Prüfung", "Termin", "Nächste Prüfung", "Firma", "Kosten", "Prüfprotokoll (PDF)", "Status", "Notiz"],
-    "E-Mail": ["Datum", "Bereich", "Betreff", "Empfänger", "Absender", "Status", "PDF / Anlage (PDF)", "Notiz"],
-    "Wichtige Verträge": ["Objekt", "Vertragstyp", "Vertragspartner", "Beginn", "Ende", "Kosten", "Status", "Vertrag (PDF)", "Notiz"],
-    "Vermieterauskunft": ["Objekt", "Vermieter", "Datum", "Bereich", "Auskunft", "Status", "Dokument (PDF)", "Notiz"],
+    "Termine": ["ID", "Titel", "Datum", "Beginn", "Ende", "Objekt", "Ort", "Notiz", "Status", "Objektordner"],
+    "Dienstleister": ["Firma", "Gewerk", "Ansprechpartner", "Telefon", "E-Mail", "Status", "Objektordner", "Kundennummer"],
+    "Rechnungen": ["Rechnungsnr.", "Dienstleister", "Objekt", "Datum", "Netto", "MwSt.", "Brutto", "Status", "Objektordner"],
+    "Dokumente": ["Titel", "Typ", "Bezug", "Datum", "Status", "Dateipfad", "Objektordner"],
+    "Aktenstruktur": ["Objekt / Adresse", "Eigentümer", "Ordnerfarbe", "Ordnerart", "Unterlagen / Register", "Status", "Ordnerpfad"],
+    "Grundsteuer": ["Objekt", "Steuernummer", "Jahr", "Betrag", "Fälligkeit", "Bescheid (PDF)", "Status", "Notiz", "Objektordner"],
+    "Versicherungen": ["Objekt", "Versicherung", "Versicherungsnummer", "Gesellschaft", "Beitrag", "Fälligkeit", "Status", "Vertrag (PDF)", "Notiz", "Objektordner"],
+    "Brand- und Arbeitsschutz": ["Objekt", "Prüfung", "Termin", "Nächste Prüfung", "Firma", "Kosten", "Prüfprotokoll (PDF)", "Status", "Notiz", "Objektordner"],
+    "E-Mail": ["Datum", "Bereich", "Betreff", "Empfänger", "Absender", "Status", "PDF / Anlage (PDF)", "Notiz", "Objektordner"],
+    "Wichtige Verträge": ["Objekt", "Vertragstyp", "Vertragspartner", "Beginn", "Ende", "Kosten", "Status", "Vertrag (PDF)", "Notiz", "Objektordner"],
+    "Vermieterauskunft": ["Objekt", "Vermieter", "Datum", "Bereich", "Auskunft", "Status", "Dokument (PDF)", "Notiz", "Objektordner"],
 
     "Wohnungsgeberauskunft": ["Mieter", "Objekt", "Wohnung", "Einzugsdatum", "Auszugsdatum", "Ausgestellt am", "Status", "Wohnungsgeberauskunft (PDF)", "Objektordner", "Wohnungsordner", "Notiz"],
     "Übergabeprotokolle": ["Mieter", "Objekt", "Wohnung", "Art", "Datum", "Zählerstände", "Schlüssel", "Status", "Übergabeprotokoll (PDF)", "Objektordner", "Wohnungsordner", "Notiz"],
     "HV-Rechnungen": ["Datum", "Rechnungsnr.", "Objekt", "Vermieter", "Leistung", "Betrag netto", "MwSt.", "Betrag brutto", "Status", "Fällig am", "Zahlung am", "Rechnung PDF", "Notiz"],
-    "Versorger": ["Versorger", "Art", "Kundennummer", "Vertragsnummer", "Objekt", "Wohnung", "Ansprechpartner", "Telefon", "E-Mail", "Vertragsbeginn", "Vertragsende", "Kündigungsfrist", "Fällig am", "Status", "Vertrag PDF", "Rechnung PDF", "Notiz"],
+    "Versorger": ["Versorger", "Art", "Kundennummer", "Vertragsnummer", "Objekt", "Wohnung", "Ansprechpartner", "Telefon", "E-Mail", "Vertragsbeginn", "Vertragsende", "Kündigungsfrist", "Fällig am", "Status", "Vertrag PDF", "Rechnung PDF", "Notiz", "Objektordner"],
     "Fristen": ["Titel", "Bereich", "Objekt", "Wohnung", "Mieter", "Fällig am", "Priorität", "Status", "Erinnerung", "Dokument PDF", "Objektordner", "Wohnungsordner", "Notiz"],
     "Aufgaben": ["Aufgabe", "Bereich", "Objekt", "Wohnung", "Mieter", "Verantwortlich", "Priorität", "Fällig am", "Status", "Dokument PDF", "Objektordner", "Wohnungsordner", "Notiz"],
     "Schäden": ["Schaden", "Objekt", "Wohnung", "Mieter", "Datum", "Beschreibung", "Priorität", "Status", "Handwerker", "Versicherung", "Kosten", "Foto/PDF", "Rechnung PDF", "Objektordner", "Wohnungsordner", "Notiz"],
@@ -60,7 +64,7 @@ DATA_FILES: dict[str, str] = {
     "Objekte": "objekte.xlsx", "Betriebskosten": "betriebskosten.xlsx", "Wohnungen": "wohnungen.xlsx",
     "Mieter": "mieter.xlsx", "Mietverträge": "mietvertraege.xlsx", "Zahlungen": "zahlungen.xlsx",
     "Zahlungsprüfung": "zahlungspruefung.xlsx", "Mahnwesen": "mahnwesen.xlsx", "Mitarbeiter": "mitarbeiter.xlsx",
-    "Stundennachweise": "stundennachweise.xlsx", "Dienstleister": "dienstleister.xlsx", "Rechnungen": "rechnungen.xlsx",
+    "Stundennachweise": "stundennachweise.xlsx", "Termine": "termine.xlsx", "Dienstleister": "dienstleister.xlsx", "Rechnungen": "rechnungen.xlsx",
     "Dokumente": "dokumente.xlsx", "Aktenstruktur": "aktenstruktur.xlsx",    "Grundsteuer": "grundsteuer.xlsx",
     "Versicherungen": "versicherungen.xlsx",    "Brand- und Arbeitsschutz": "brand_arbeitsschutz.xlsx",
     "E-Mail": "email.xlsx",
@@ -100,10 +104,9 @@ def resource_path(relative_path: str | Path) -> Path:
 
 
 CONFIG_FILE = APP_DIR / "config.json"
-ASSETS_DIR = resource_path("assets")
 LOGO_FILE = resource_path("assets/dbs_logo.png")
 APP_ICON_FILE = resource_path("assets/dbs_logo.ico")
-DEFAULT_CONFIG = {"modus":"lokal","basis_pfad":"","daten_pfad":"daten","dokumente_pfad":"dokumente/pdf","exports_pfad":"exports","akten_pfad":"akten","backup_pfad":"backups","feedback_pfad":"feedback","theme":"hell","start_vollbild":"ja","auto_backup_start":"nein","tabellen_zeilenhoehe":"34"}
+DEFAULT_CONFIG = {"modus":"lokal","basis_pfad":"","daten_pfad":"daten","dokumente_pfad":"dokumente/pdf","exports_pfad":"exports","akten_pfad":"akten","backup_pfad":"backups","feedback_pfad":"feedback","theme":"hell","start_vollbild":"ja","auto_backup_start":"nein","tabellen_zeilenhoehe":"34", "firma_name":"DBS Hausverwaltung", "firma_untertitel":"Kaufmännische und technische Verwaltung", "firma_leistung":"Rentabilität, Betriebskosten, Hausservice", "firma_slogan":"Mit uns erwirtschaften Sie Gewinn!", "firma_inhaber":"Inh. Dipl. Betriebsw. Ulrike Schreiner", "firma_strasse":"Kirchstraße 3", "firma_plz_ort":"04703 Leisnig", "firma_telefon":"034321/13432", "firma_email":"", "firma_web":"", "firma_bank":"", "firma_iban":"", "firma_bic":"", "firma_steuer":"", "firma_logo":"", "firma_gruss":"Mit freundlichen Grüßen\nDBS Hausverwaltung", "bk_hinweis":"Bitte prüfen Sie die Abrechnung. Ein Guthaben wird verrechnet bzw. ausgezahlt; eine Nachzahlung ist zum angegebenen Termin fällig."}
 
 def lade_config():
     if not CONFIG_FILE.exists():
@@ -171,8 +174,6 @@ def excel_text(value: object) -> str:
 
 
 def erstelle_schnellbackup() -> Path | None:
-    from datetime import datetime
-    import zipfile
 
     try:
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -255,6 +256,11 @@ def speichere_tabelle(titel: str) -> None:
     if titel not in SCHEMA:
         raise ValueError(f"Unbekannte Tabelle: {titel}")
 
+    # Bestehende Spalten werden konsistent befüllt; es werden keine Spalten ergänzt.
+    normalizer = globals().get("objektordner_zuordnungen_normalisieren")
+    if callable(normalizer):
+        normalizer(titel)
+
     wb = Workbook()
     ws = wb.active
 
@@ -300,8 +306,34 @@ def lade_alle():
     speichere_tabelle("Zahlungsprüfung")
 
 def to_float(value: Any, default: float = 0.0) -> float:
+    """Liest Zahlen robust, auch im deutschen Format wie 1.234,56 €."""
     try:
-        return float(str(value).replace(",", "."))
+        if value is None:
+            return default
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        text_value = str(value).strip()
+        if not text_value:
+            return default
+
+        # Währung, Leerzeichen und sonstige Zusätze entfernen.
+        text_value = re.sub(r"[^0-9,.+\\-]", "", text_value)
+
+        if "," in text_value and "." in text_value:
+            # Das zuletzt vorkommende Trennzeichen gilt als Dezimaltrennzeichen.
+            if text_value.rfind(",") > text_value.rfind("."):
+                text_value = text_value.replace(".", "").replace(",", ".")
+            else:
+                text_value = text_value.replace(",", "")
+        elif "," in text_value:
+            text_value = text_value.replace(".", "").replace(",", ".")
+        elif text_value.count(".") > 1:
+            # Mehrere Punkte ohne Komma sind üblicherweise Tausendertrennzeichen.
+            parts = text_value.split(".")
+            text_value = "".join(parts[:-1]) + "." + parts[-1]
+
+        return float(text_value)
     except (ValueError, TypeError):
         return default
 
@@ -481,7 +513,6 @@ def baue_stylesheet():
 
     if dunkel:
         bg = "#09111f"
-        bg_soft = "#0d1728"
         panel = "#111d30"
         panel_hover = "#17263d"
         panel_alt = "#0d192a"
@@ -491,10 +522,8 @@ def baue_stylesheet():
         input_bg = "#0d192a"
         header_bg = "#0b1525"
         table_alt = "#132239"
-        shadow = "#020617"
     else:
         bg = "#eef3f9"
-        bg_soft = "#e8eef6"
         panel = "#ffffff"
         panel_hover = "#f7faff"
         panel_alt = "#f5f8fc"
@@ -504,7 +533,6 @@ def baue_stylesheet():
         input_bg = "#ffffff"
         header_bg = "#ffffff"
         table_alt = "#f7f9fc"
-        shadow = "#cbd5e1"
 
     return f"""
     QWidget {{
@@ -857,31 +885,76 @@ def baue_stylesheet():
 
 
 def dashboard_kennzahlen() -> dict[str, float]:
+    """Berechnet Dashboardwerte über Spaltennamen statt feste Indexpositionen."""
     wohnungen = DATA.get("Wohnungen", [])
     mieter = DATA.get("Mieter", [])
     zahlungen = DATA.get("Zahlungen", [])
+    rechnungen = DATA.get("Rechnungen", [])
+
     gesamt_wohnungen = len(wohnungen)
     vermietet = 0
     frei = 0
+
     for row in wohnungen:
-        status = str(row[5]).lower().strip() if len(row) > 5 else ""
-        if any(w in status for w in ["vermietet", "aktiv", "belegt"]): vermietet += 1
-        elif any(w in status for w in ["frei", "leer", "unvermietet", "verfügbar"]): frei += 1
+        status = feldwert("Wohnungen", row, ["Status"]).lower().strip()
+        if any(w in status for w in ["vermietet", "aktiv", "belegt"]):
+            vermietet += 1
+        elif any(w in status for w in ["frei", "leer", "unvermietet", "verfügbar"]):
+            frei += 1
+
     monatsmiete = 0.0
     for row in mieter:
-        if len(row) > 6: monatsmiete += to_float(row[6])
-        elif len(row) > 7: monatsmiete += to_float(row[7])
+        # Bevorzugt Gesamtmiete, ersatzweise Kaltmiete.
+        mietwert = feldwert("Mieter", row, ["Miete"])
+        if not mietwert:
+            mietwert = feldwert("Mieter", row, ["Kaltmiete"])
+        monatsmiete += to_float(mietwert)
+
     offene_bk = 0.0
     offene_rechnungen = 0.0
+
+    # Offene Zahlungsposten anhand der vorhandenen Spaltennamen auswerten.
     for row in zahlungen:
-        betrag = to_float(row[2]) if len(row) > 2 else 0.0
-        status = str(row[5]).lower() if len(row) > 5 else ""
-        kostenart = str(row[6]).lower() if len(row) > 6 else ""
-        if "offen" in status:
-            if "betrieb" in kostenart or "bk" in kostenart or "abwasser" in kostenart: offene_bk += betrag
-            else: offene_rechnungen += betrag
+        betrag = to_float(feldwert("Zahlungen", row, ["Betrag"]))
+        status = feldwert("Zahlungen", row, ["Status"]).lower()
+        kostenart = feldwert("Zahlungen", row, ["Kostenart"]).lower()
+
+        if "offen" not in status and "fällig" not in status and "faellig" not in status:
+            continue
+
+        if any(w in kostenart for w in ["betrieb", "bk", "abwasser", "nebenkosten", "heizkosten"]):
+            offene_bk += abs(betrag)
+        else:
+            offene_rechnungen += abs(betrag)
+
+    # Offene Datensätze aus der eigenen Rechnungstabelle ergänzen.
+    for row in rechnungen:
+        status = feldwert("Rechnungen", row, ["Status"]).lower()
+        if "offen" not in status and "fällig" not in status and "faellig" not in status:
+            continue
+
+        betrag_text = feldwert(
+            "Rechnungen",
+            row,
+            ["Brutto", "Betrag brutto", "Betrag", "Netto"],
+        )
+        offene_rechnungen += abs(to_float(betrag_text))
+
     quote = (vermietet / gesamt_wohnungen * 100) if gesamt_wohnungen else 0.0
-    return {"objekte": float(len(DATA.get("Objekte", []))), "wohnungen": float(gesamt_wohnungen), "mieter": float(len(mieter)), "leerstand": float(frei), "vermietungsquote": quote, "monatsmiete": monatsmiete, "jahresmiete": monatsmiete * 12, "offene_bk": offene_bk, "offene_rechnungen": offene_rechnungen, "vermietet": float(vermietet), "frei": float(frei)}
+
+    return {
+        "objekte": float(len(DATA.get("Objekte", []))),
+        "wohnungen": float(gesamt_wohnungen),
+        "mieter": float(len(mieter)),
+        "leerstand": float(frei),
+        "vermietungsquote": quote,
+        "monatsmiete": monatsmiete,
+        "jahresmiete": monatsmiete * 12,
+        "offene_bk": offene_bk,
+        "offene_rechnungen": offene_rechnungen,
+        "vermietet": float(vermietet),
+        "frei": float(frei),
+    }
 
 def euro(value: float) -> str:
     return f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -940,38 +1013,17 @@ def flex_wert(row: list[str], felder: list[str], namen: list[str]) -> str:
     return ""
 
 
-def mieter_suchtext(row: list[str]) -> str:
-    felder = SCHEMA.get("Mieter", [])
-    werte = [str(v) for v in row]
-
-    objekt = flex_wert(row, felder, ["Objekt", "Objektordner"])
-    wohnung = flex_wert(row, felder, ["Wohnung", "Wohnungsordner"])
-
-    ort = flex_wert(row, felder, ["Ort"])
-    if ort:
-        werte.append(ort)
-        if "/" in ort:
-            teile = [t.strip() for t in ort.split("/") if t.strip()]
-            werte.extend(teile)
-
-    if objekt:
-        werte.append(objekt)
-        werte.append(Path(objekt).name)
-
-    if wohnung:
-        werte.append(wohnung)
-        werte.append(Path(wohnung).name)
-
-    return " ".join(werte).lower()
 
 class EingabeDialog(QDialog):
-    def __init__(self, titel, felder, werte=None):
+    def __init__(self, titel, felder, werte=None, bereich=""):
         super().__init__()
+        self.bereich = str(bereich or "").strip()
         self.setWindowTitle(titel)
         self.resize(960, 760)
 
         # Die Anzeige ist gruppiert, aber gespeichert wird exakt nach Original-Spaltenindex.
         self.inputs_by_index: dict[int, QWidget] = {}
+        self.felder = list(felder)
         self.felder_count = len(felder)
 
         root = QVBoxLayout(self)
@@ -1028,7 +1080,7 @@ class EingabeDialog(QDialog):
         save.setObjectName("primaryButton")
         cancel = QPushButton("Abbrechen")
 
-        save.clicked.connect(self.accept)
+        save.clicked.connect(self._validate_and_accept)
         cancel.clicked.connect(self.reject)
 
         buttons.addWidget(save)
@@ -1123,6 +1175,112 @@ class EingabeDialog(QDialog):
 
         return QLineEdit(str(wert))
 
+
+    @staticmethod
+    def _widget_wert(widget: QWidget | None) -> str:
+        if widget is None:
+            return ""
+        if isinstance(widget, QTextEdit):
+            return widget.toPlainText().strip()
+        if isinstance(widget, QComboBox):
+            return widget.currentText().strip()
+        if hasattr(widget, "text"):
+            return str(widget.text()).strip()
+        return ""
+
+    @staticmethod
+    def _widget_setzen(widget: QWidget | None, value: str) -> None:
+        if widget is None:
+            return
+        if isinstance(widget, QTextEdit):
+            widget.setPlainText(value)
+        elif isinstance(widget, QComboBox):
+            widget.setCurrentText(value)
+        elif hasattr(widget, "setText"):
+            widget.setText(value)
+
+    def _validate_and_accept(self) -> None:
+        """Erzwingt für objektbezogene Masken einen gültigen Objektordner."""
+        object_folder_indexes = [
+            index for index, field in enumerate(self.felder)
+            if norm_key(field) in {"objektordner", "objekt-ordner", "objektordner-id"}
+        ]
+        object_indexes = [
+            index for index, field in enumerate(self.felder)
+            if norm_key(field) in {"objekt", "objektname", "objekt / adresse"}
+        ]
+
+        # Masken ohne Objektbezug bleiben unverändert.
+        if not object_folder_indexes and not object_indexes:
+            self.accept()
+            return
+
+        # In den Objekt-Stammdaten darf ein neuer Objektordner entstehen.
+        # Andere Bereiche verlangen weiterhin einen bereits bekannten Ordner.
+        if self.bereich == "Objekte":
+            objektname = ""
+            for index in object_indexes:
+                objektname = self._widget_wert(self.inputs_by_index.get(index))
+                if objektname:
+                    break
+
+            objektordner = ""
+            for index in object_folder_indexes:
+                objektordner = self._widget_wert(self.inputs_by_index.get(index))
+                if objektordner:
+                    break
+
+            neuer_bezug = objektordner or objektname
+            if not objektordner_wert_plausibel(neuer_bezug):
+                QMessageBox.warning(
+                    self,
+                    "Objektordner erforderlich",
+                    "Bitte einen gültigen Objektnamen oder Objektordner eingeben.",
+                )
+                return
+
+            # Ausschließlich bestehende Felder befüllen; keine Excel-Strukturänderung.
+            for index in object_folder_indexes:
+                if not self._widget_wert(self.inputs_by_index.get(index)):
+                    self._widget_setzen(self.inputs_by_index.get(index), neuer_bezug)
+
+            self.accept()
+            return
+
+        candidates: list[str] = []
+        for index in object_folder_indexes + object_indexes:
+            value = self._widget_wert(self.inputs_by_index.get(index))
+            if value:
+                candidates.append(value)
+
+        valid = ""
+        for candidate in candidates:
+            valid = normalisiere_gueltigen_objektordner(candidate)
+            if valid:
+                break
+
+        if not valid:
+            QMessageBox.warning(
+                self,
+                "Objektordner erforderlich",
+                "Dieser Datensatz muss einem vorhandenen, eindeutigen Objektordner "
+                "zugeordnet werden. Bitte im Feld Objekt oder Objektordner einen "
+                "gültigen Objektordner auswählen.",
+            )
+            return
+
+        # Alle vorhandenen Objektordner-Spalten konsistent befüllen.
+        for index in object_folder_indexes:
+            self._widget_setzen(self.inputs_by_index.get(index), valid)
+
+        # Ein leeres Objektfeld ebenfalls mit dem eindeutigen Bezug versehen.
+        for index in object_indexes:
+            widget = self.inputs_by_index.get(index)
+            if not self._widget_wert(widget):
+                self._widget_setzen(widget, valid)
+
+        self.accept()
+
     def values(self):
         out = []
 
@@ -1144,87 +1302,6 @@ class EingabeDialog(QDialog):
 
 
 
-class BKRechnerDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("BK-Abrechnung")
-        self.resize(620, 430)
-
-        layout = QVBoxLayout(self)
-
-        title = QLabel("BK-Abrechnung")
-        title.setObjectName("pageTitle")
-        layout.addWidget(title)
-
-        info = QLabel("BK-Vorauszahlung gegen tatsächliche Ist-Betriebskosten rechnen.")
-        info.setObjectName("metricTitle")
-        layout.addWidget(info)
-
-        form = QFormLayout()
-
-        self.vorauszahlung_monatlich = QLineEdit()
-        self.vorauszahlung_monatlich.setPlaceholderText("z. B. 180,00")
-
-        self.monate = QLineEdit("12")
-
-        self.ist_bk = QLineEdit()
-        self.ist_bk.setPlaceholderText("z. B. 2450,00")
-
-        self.vorauszahlung_jahr = QLineEdit()
-        self.vorauszahlung_jahr.setReadOnly(True)
-
-        self.ergebnis = QLineEdit()
-        self.ergebnis.setReadOnly(True)
-
-        self.status = QLineEdit()
-        self.status.setReadOnly(True)
-
-        form.addRow("BK-Vorauszahlung monatlich:", self.vorauszahlung_monatlich)
-        form.addRow("Monate:", self.monate)
-        form.addRow("Ist-BK jährlich:", self.ist_bk)
-        form.addRow("Vorauszahlung gesamt:", self.vorauszahlung_jahr)
-        form.addRow("Nachzahlung / Guthaben:", self.ergebnis)
-        form.addRow("Status:", self.status)
-
-        layout.addLayout(form)
-
-        buttons = QHBoxLayout()
-        berechnen = QPushButton("Abrechnung berechnen")
-        berechnen.setObjectName("primaryButton")
-        schliessen = QPushButton("Schließen")
-
-        berechnen.clicked.connect(self.berechnen)
-        schliessen.clicked.connect(self.accept)
-
-        buttons.addStretch()
-        buttons.addWidget(berechnen)
-        buttons.addWidget(schliessen)
-        layout.addLayout(buttons)
-
-    def berechnen(self) -> None:
-        monatlich = to_float(self.vorauszahlung_monatlich.text())
-        monate = to_float(self.monate.text(), 12.0)
-        ist = to_float(self.ist_bk.text())
-
-        vorauszahlung = monatlich * monate
-        differenz = ist - vorauszahlung
-
-        self.vorauszahlung_jahr.setText(f"{vorauszahlung:.2f}")
-        self.ergebnis.setText(f"{abs(differenz):.2f}")
-
-        if differenz > 0.009:
-            self.status.setText("Nachzahlung")
-        elif differenz < -0.009:
-            self.status.setText("Guthaben")
-        else:
-            self.status.setText("Ausgeglichen")
-
-    def werte(self) -> tuple[str, str, str]:
-        return (
-            self.vorauszahlung_jahr.text().strip(),
-            self.ergebnis.text().strip(),
-            self.status.text().strip(),
-        )
 
 
 class EinstellungenDialog(QDialog):
@@ -1300,6 +1377,49 @@ class EinstellungenDialog(QDialog):
         form3.addRow("Konfiguration:", config_btn)
         tabs.addTab(tab_sicherheit, "Sicherheit")
 
+        tab_firma = QWidget()
+        firma_form = QFormLayout(tab_firma)
+        self.firma_felder: dict[str, QLineEdit | QTextEdit] = {}
+        firma_definitionen = [
+            ("firma_name", "Firmenname"),
+            ("firma_untertitel", "Untertitel"),
+            ("firma_leistung", "Leistungszeile"),
+            ("firma_slogan", "Slogan"),
+            ("firma_inhaber", "Inhaber / Geschäftsführung"),
+            ("firma_strasse", "Straße"),
+            ("firma_plz_ort", "PLZ / Ort"),
+            ("firma_telefon", "Telefon"),
+            ("firma_email", "E-Mail"),
+            ("firma_web", "Webseite"),
+            ("firma_bank", "Bank"),
+            ("firma_iban", "IBAN"),
+            ("firma_bic", "BIC"),
+            ("firma_steuer", "Steuernummer / USt-ID"),
+        ]
+        for key, label in firma_definitionen:
+            edit = QLineEdit(str(CONFIG.get(key, "")))
+            self.firma_felder[key] = edit
+            firma_form.addRow(label + ":", edit)
+
+        self.firma_logo = QLineEdit(str(CONFIG.get("firma_logo", "")))
+        logo_row = QWidget()
+        logo_lay = QHBoxLayout(logo_row)
+        logo_lay.setContentsMargins(0, 0, 0, 0)
+        logo_btn = QPushButton("Logo wählen")
+        logo_btn.clicked.connect(self.waehle_firmenlogo)
+        logo_lay.addWidget(self.firma_logo, 1)
+        logo_lay.addWidget(logo_btn)
+        firma_form.addRow("Logo:", logo_row)
+
+        self.firma_gruss = QTextEdit(str(CONFIG.get("firma_gruss", "")))
+        self.firma_gruss.setMinimumHeight(75)
+        firma_form.addRow("Grußformel:", self.firma_gruss)
+
+        self.bk_hinweis = QTextEdit(str(CONFIG.get("bk_hinweis", "")))
+        self.bk_hinweis.setMinimumHeight(90)
+        firma_form.addRow("BK-Hinweistext:", self.bk_hinweis)
+        tabs.addTab(tab_firma, "Firmenlayout")
+
         buttons = QHBoxLayout()
         buttons.addStretch()
         save = QPushButton("Speichern")
@@ -1357,6 +1477,16 @@ class EinstellungenDialog(QDialog):
         if ziel is not None:
             QMessageBox.information(self, "Backup", "Backup erstellt:\n" + str(ziel))
 
+    def waehle_firmenlogo(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Firmenlogo auswählen",
+            self.firma_logo.text().strip(),
+            "Bilder (*.png *.jpg *.jpeg *.bmp)",
+        )
+        if path:
+            self.firma_logo.setText(path)
+
     def speichern(self):
         CONFIG["basis_pfad"] = self.basis.text().strip()
         CONFIG["daten_pfad"] = self.daten.text().strip() or "daten"
@@ -1369,18 +1499,17 @@ class EinstellungenDialog(QDialog):
         CONFIG["start_vollbild"] = self.start_vollbild.currentText()
         CONFIG["auto_backup_start"] = self.auto_backup.currentText()
         CONFIG["tabellen_zeilenhoehe"] = self.zeilenhoehe.currentText()
+        for key, widget in self.firma_felder.items():
+            CONFIG[key] = widget.text().strip()
+        CONFIG["firma_logo"] = self.firma_logo.text().strip()
+        CONFIG["firma_gruss"] = self.firma_gruss.toPlainText().strip()
+        CONFIG["bk_hinweis"] = self.bk_hinweis.toPlainText().strip()
 
         CONFIG_FILE.write_text(json.dumps(CONFIG, indent=4, ensure_ascii=False), encoding="utf-8")
         QMessageBox.information(self, "Gespeichert", "Einstellungen gespeichert. Bitte Programm neu starten.")
         self.accept()
 
 
-class Card(QFrame):
-    def __init__(self,title,value,icon,target,callback):
-        super().__init__(); self.target=target; self.callback=callback; self.setObjectName("metricCard"); self.setCursor(Qt.CursorShape.PointingHandCursor)
-        lay=QVBoxLayout(self); t=QLabel(f"{icon}  {title}"); t.setObjectName("metricTitle"); v=QLabel(value); v.setObjectName("metricValue"); link=QLabel("Details anzeigen →"); link.setObjectName("metricLink")
-        lay.addWidget(t); lay.addWidget(v); lay.addStretch(); lay.addWidget(link)
-    def mousePressEvent(self,event): self.callback(self.target); super().mousePressEvent(event)
 
 
 
@@ -1610,7 +1739,6 @@ class BeziehungsAnalyseDialog(QDialog):
             QMessageBox.information(self, "Export", "Es gibt keine Treffer zum Exportieren.")
             return
 
-        from datetime import datetime
 
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         default_name = EXPORT_DIR / f"analyse_center_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
@@ -1656,147 +1784,6 @@ class BeziehungsAnalyseDialog(QDialog):
         QMessageBox.information(self, "Export", f"Analyse exportiert:\n{ziel}")
         system_datei_oeffnen(str(ziel.parent))
 
-class AnalyseVermietungDialog(QDialog):
-    """Analyse: vermietet/frei pro Objekt und Vermieter."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Analyse Vermietung")
-        self.resize(1050, 680)
-
-        layout = QVBoxLayout(self)
-
-        title = QLabel("Analyse Vermietung")
-        title.setObjectName("pageTitle")
-        layout.addWidget(title)
-
-        info = QLabel("Auswertung der Wohnungen nach Status: vermietet und frei – gruppiert nach Objekt und Vermieter.")
-        info.setObjectName("metricTitle")
-        layout.addWidget(info)
-
-        self.tabs = QTabWidget()
-        layout.addWidget(self.tabs, 1)
-
-        self.table_objekte = QTableWidget()
-        self.table_vermieter = QTableWidget()
-
-        self.tabs.addTab(self.table_objekte, "Pro Objekt")
-        self.tabs.addTab(self.table_vermieter, "Pro Vermieter")
-
-        buttons = QHBoxLayout()
-        buttons.addStretch()
-
-        refresh = QPushButton("Aktualisieren")
-        refresh.setObjectName("primaryButton")
-        refresh.clicked.connect(self.laden)
-
-        close_btn = QPushButton("Schließen")
-        close_btn.clicked.connect(self.accept)
-
-        buttons.addWidget(refresh)
-        buttons.addWidget(close_btn)
-        layout.addLayout(buttons)
-
-        self.laden()
-
-    @staticmethod
-    def _status_ist_vermietet(status: str) -> bool:
-        s = status.lower().strip()
-        return any(wort in s for wort in ["vermietet", "aktiv", "belegt"])
-
-    @staticmethod
-    def _status_ist_frei(status: str) -> bool:
-        s = status.lower().strip()
-        return any(wort in s for wort in ["frei", "leer", "verfügbar", "unvermietet"])
-
-    @staticmethod
-    def _objekt_zu_vermieter() -> dict[str, str]:
-        mapping: dict[str, str] = {}
-
-        for row in DATA.get("Objekte", []):
-            objekt = row[0] if len(row) > 0 else ""
-            vermieter = row[1] if len(row) > 1 else ""
-
-            if objekt:
-                mapping[str(objekt).strip()] = str(vermieter).strip()
-
-        return mapping
-
-    def _wohnungen_auswerten(self) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]]]:
-        objekt_auswertung: dict[str, dict[str, int]] = {}
-        vermieter_auswertung: dict[str, dict[str, int]] = {}
-        objekt_vermieter = self._objekt_zu_vermieter()
-
-        for row in DATA.get("Wohnungen", []):
-            objekt = str(row[0]).strip() if len(row) > 0 else "Ohne Objekt"
-            status = str(row[5]).strip() if len(row) > 5 else ""
-
-            vermieter = objekt_vermieter.get(objekt, "Ohne Vermieter")
-
-            for key, ziel in [(objekt, objekt_auswertung), (vermieter, vermieter_auswertung)]:
-                if key not in ziel:
-                    ziel[key] = {
-                        "gesamt": 0,
-                        "vermietet": 0,
-                        "frei": 0,
-                        "unklar": 0,
-                    }
-
-                ziel[key]["gesamt"] += 1
-
-                if self._status_ist_vermietet(status):
-                    ziel[key]["vermietet"] += 1
-                elif self._status_ist_frei(status):
-                    ziel[key]["frei"] += 1
-                else:
-                    ziel[key]["unklar"] += 1
-
-        return objekt_auswertung, vermieter_auswertung
-
-    def laden(self) -> None:
-        objekt_auswertung, vermieter_auswertung = self._wohnungen_auswerten()
-        self._fuellen(self.table_objekte, "Objekt", objekt_auswertung)
-        self._fuellen(self.table_vermieter, "Vermieter", vermieter_auswertung)
-
-    def _fuellen(self, table: QTableWidget, titel: str, daten: dict[str, dict[str, int]]) -> None:
-        table.setColumnCount(6)
-        table.setHorizontalHeaderLabels([
-            titel,
-            "Gesamt",
-            "Vermietet",
-            "Frei",
-            "Unklar",
-            "Vermietungsquote",
-        ])
-        table.setRowCount(len(daten))
-        table.setAlternatingRowColors(True)
-        table.setWordWrap(False)
-        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-
-        for row_index, key in enumerate(sorted(daten.keys())):
-            values = daten[key]
-            gesamt = values["gesamt"]
-            vermietet = values["vermietet"]
-            frei = values["frei"]
-            unklar = values["unklar"]
-            quote = (vermietet / gesamt * 100) if gesamt else 0
-
-            row_values = [
-                key,
-                str(gesamt),
-                str(vermietet),
-                str(frei),
-                str(unklar),
-                f"{quote:.1f} %",
-            ]
-
-            for col_index, value in enumerate(row_values):
-                table.setItem(row_index, col_index, QTableWidgetItem(value))
-
-        table.setColumnWidth(0, 280)
-        for col in range(1, 6):
-            table.setColumnWidth(col, 140)
 
 
 def zeile_offen(row: list[str], felder: list[str]) -> bool:
@@ -2021,11 +2008,14 @@ def objektordner_rohliste() -> list[str]:
     """
     values: set[str] = set()
 
-    # Objekte: Objektname ist der zentrale stabile Schlüssel.
+    # Objekte: Objektname und die bereits vorhandene Objektordner-Spalte.
     for row in DATA.get("Objekte", []):
-        value = feldwert("Objekte", row, ["Objektname", "Objekt"])
-        if value:
-            values.add(value.strip())
+        objektname = feldwert("Objekte", row, ["Objektname", "Objekt"])
+        objektordner = feldwert("Objekte", row, ["Objektordner"])
+        if objektname:
+            values.add(objektname.strip())
+        if objektordner:
+            values.add(objektordner.strip())
 
     # Wohnungen: vorhandener Objektordner oder Objekt.
     for row in DATA.get("Wohnungen", []):
@@ -2109,9 +2099,6 @@ def normalisiere_gueltigen_objektordner(value: Any) -> str:
     return ""
 
 
-def objektordner_aus_objekt(objektname: str) -> str:
-    """Löst nur gegen gültige Stammdaten auf."""
-    return normalisiere_gueltigen_objektordner(objektname)
 
 
 def objektordner_fuer_datensatz(titel: str, row: list[Any]) -> str:
@@ -2208,6 +2195,47 @@ def objektordner_fuer_datensatz(titel: str, row: list[Any]) -> str:
             return next(iter(passende_objekte))
 
     return ""
+
+
+
+def objektordner_zuordnungen_normalisieren(titel: str) -> list[int]:
+    """
+    Schreibt einen eindeutig ermittelten Objektordner in bereits vorhandene
+    Objekt-/Objektordner-Felder. Die Excelstruktur wird nicht verändert.
+    Rückgabe: Zeilennummern, deren Bezug nicht eindeutig ermittelt werden konnte.
+    """
+    fields = SCHEMA.get(titel, [])
+    object_folder_indexes = [
+        index for index, field in enumerate(fields)
+        if norm_key(field) in {"objektordner", "objekt-ordner", "objektordner-id"}
+    ]
+    object_indexes = [
+        index for index, field in enumerate(fields)
+        if norm_key(field) in {"objekt", "objektname", "objekt / adresse"}
+    ]
+
+    if not object_folder_indexes and not object_indexes:
+        return []
+
+    unresolved: list[int] = []
+    for row_number, row in enumerate(DATA.get(titel, []), start=2):
+        while len(row) < len(fields):
+            row.append("")
+
+        relation = objektordner_fuer_datensatz(titel, row)
+        valid = normalisiere_gueltigen_objektordner(relation)
+        if not valid:
+            unresolved.append(row_number)
+            continue
+
+        for index in object_folder_indexes:
+            row[index] = valid
+        for index in object_indexes:
+            if not str(row[index]).strip():
+                row[index] = valid
+
+    return unresolved
+
 
 
 def alle_objektordner() -> list[str]:
@@ -2354,7 +2382,6 @@ class ObjektordnerPruefungSeite(QWidget):
             )
             return
 
-        from datetime import datetime
 
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         default = EXPORT_DIR / (
@@ -2762,14 +2789,6 @@ def widget_enthaelt_text(widget: QWidget, suchbegriffe: list[str]) -> bool:
         return False
 
 
-def verstecke_mieter_ordner_widgets(root_widget: QWidget) -> None:
-    suchbegriffe = ["objektordner", "wohnungsordner", "objekt ordner", "wohnungs ordner"]
-    for widget in root_widget.findChildren(QWidget):
-        if widget_enthaelt_text(widget, suchbegriffe):
-            widget.setVisible(False)
-            parent = widget.parentWidget()
-            if parent and widget_enthaelt_text(parent, suchbegriffe):
-                parent.setVisible(False)
 
 class TabellenSeite(QWidget):
     def __init__(self,titel):
@@ -2783,7 +2802,7 @@ class TabellenSeite(QWidget):
         top.addWidget(QLabel("Objektordner:"))
         top.addWidget(self.objekt_filter)
         top.addWidget(self.search)
-        for text,fn in [("+ Neu",self.neu),("Bearbeiten",self.bearbeiten),("Löschen",self.loeschen),("Excel öffnen",self.excel_oeffnen),("XLSX Import",self.xlsx_import),("XLSX Export",self.xlsx_export),("PDF hochladen",self.pdf_upload),("PDF öffnen",self.pdf_oeffnen),("Ordner wählen",self.ordner_waehlen),("Ordner öffnen",self.ordner_oeffnen),("BK-Abrechnung",self.bk_rechner)]:
+        for text,fn in [("+ Neu",self.neu),("Bearbeiten",self.bearbeiten),("Löschen",self.loeschen),("Excel öffnen",self.excel_oeffnen),("XLSX Import",self.xlsx_import),("XLSX Export",self.xlsx_export),("PDF hochladen",self.pdf_upload),("PDF öffnen",self.pdf_oeffnen),("Ordner wählen",self.ordner_waehlen),("Ordner öffnen",self.ordner_oeffnen)]:
             b=QPushButton(text)
             b.setMinimumWidth(125)
             b.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
@@ -2882,12 +2901,31 @@ class TabellenSeite(QWidget):
             except ValueError: return r
         return None
     def neu(self):
-        d=EingabeDialog(f"{self.titel} anlegen",self.felder)
-        if d.exec(): self.daten.append(d.values()); speichere_tabelle(self.titel); self.after_change()
+        # Beim Anlegen eines Dienstleisters den aktuell gewählten Objektordner übernehmen.
+        # Bestehende Datensätze und Excel-Spalten bleiben dabei vollständig erhalten.
+        startwerte = ["" for _ in self.felder]
+        if self.titel == "Dienstleister":
+            gewaehlt = self.objekt_filter.currentText().strip()
+            if gewaehlt and gewaehlt != "Alle Objektordner":
+                for index, feld in enumerate(self.felder):
+                    if norm_key(feld) == norm_key("Objektordner"):
+                        startwerte[index] = gewaehlt
+                        break
+
+        d=EingabeDialog(
+            f"{self.titel} anlegen",
+            self.felder,
+            startwerte,
+            bereich=self.titel,
+        )
+        if d.exec():
+            self.daten.append(d.values())
+            speichere_tabelle(self.titel)
+            self.after_change()
     def bearbeiten(self):
         i=self.idx()
         if i is None: return
-        d=EingabeDialog(f"{self.titel} bearbeiten",self.felder,self.daten[i])
+        d=EingabeDialog(f"{self.titel} bearbeiten", self.felder, self.daten[i], bereich=self.titel)
         if d.exec(): self.daten[i]=d.values(); speichere_tabelle(self.titel); self.after_change()
     def loeschen(self):
         i=self.idx()
@@ -3015,60 +3053,6 @@ class TabellenSeite(QWidget):
             QMessageBox.information(self, "Ordner", "Es ist kein Ordner hinterlegt.")
 
 
-    def bk_rechner(self) -> None:
-        dialog = BKRechnerDialog(self)
-
-        if not dialog.exec():
-            return
-
-        vorauszahlung_jahr, betrag, status = dialog.werte()
-
-        if not vorauszahlung_jahr:
-            return
-
-        i = self.idx()
-        if i is None:
-            return
-
-        def finde_spalte(name: str) -> int | None:
-            such = name.lower()
-            for index, feld in enumerate(self.felder):
-                if such in str(feld).lower():
-                    return index
-            return None
-
-        bk_jahr_col = finde_spalte("BK jährlich")
-        nachzahlung_col = finde_spalte("Nachzahlung")
-        guthaben_col = finde_spalte("Guthaben")
-        status_col = finde_spalte("BK-Status")
-
-        while len(self.daten[i]) < len(self.felder):
-            self.daten[i].append("")
-
-        if bk_jahr_col is not None:
-            self.daten[i][bk_jahr_col] = vorauszahlung_jahr
-
-        if status == "Nachzahlung":
-            if nachzahlung_col is not None:
-                self.daten[i][nachzahlung_col] = betrag
-            if guthaben_col is not None:
-                self.daten[i][guthaben_col] = ""
-        elif status == "Guthaben":
-            if guthaben_col is not None:
-                self.daten[i][guthaben_col] = betrag
-            if nachzahlung_col is not None:
-                self.daten[i][nachzahlung_col] = ""
-        else:
-            if nachzahlung_col is not None:
-                self.daten[i][nachzahlung_col] = "0.00"
-            if guthaben_col is not None:
-                self.daten[i][guthaben_col] = "0.00"
-
-        if status_col is not None:
-            self.daten[i][status_col] = status
-
-        speichere_tabelle(self.titel)
-        self.laden()
 
 
     def zelle_doppelklick(self, _row: int, col: int) -> None:
@@ -3076,81 +3060,6 @@ class TabellenSeite(QWidget):
             self.pdf_oeffnen()
 
 
-class GlobaleSucheDialog(QDialog):
-    """Einfache globale Suche über alle geladenen Tabellen."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Globale Suche")
-        self.resize(1000, 650)
-
-        layout = QVBoxLayout(self)
-
-        title = QLabel("Globale Suche")
-        title.setObjectName("pageTitle")
-        layout.addWidget(title)
-
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Suchbegriff eingeben – z. B. Name, Objekt, Rechnung, Telefonnummer ...")
-        self.search.textChanged.connect(self.suchen)
-        layout.addWidget(self.search)
-
-        self.table = QTableWidget()
-        self.table.setAlternatingRowColors(True)
-        self.table.setWordWrap(False)
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Bereich", "Zeile", "Treffer", "Inhalt"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(0, 180)
-        self.table.setColumnWidth(1, 80)
-        self.table.setColumnWidth(2, 220)
-        self.table.setColumnWidth(3, 520)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        layout.addWidget(self.table, 1)
-
-        buttons = QHBoxLayout()
-        buttons.addStretch()
-        close_btn = QPushButton("Schließen")
-        close_btn.clicked.connect(self.accept)
-        buttons.addWidget(close_btn)
-        layout.addLayout(buttons)
-
-    def suchen(self) -> None:
-        query = self.search.text().strip().lower()
-        results: list[tuple[str, int, str, str]] = []
-
-        if query:
-            for bereich, rows in DATA.items():
-                felder = SCHEMA.get(bereich, [])
-
-                for row_index, row in enumerate(rows, start=1):
-                    row_text = " ".join(str(value) for value in row).lower()
-
-                    if query not in row_text:
-                        continue
-
-                    treffer_feld = ""
-                    for col_index, value in enumerate(row):
-                        if query in str(value).lower():
-                            feldname = felder[col_index] if col_index < len(felder) else f"Spalte {col_index + 1}"
-                            treffer_feld = f"{feldname}: {value}"
-                            break
-
-                    results.append((
-                        bereich,
-                        row_index,
-                        treffer_feld,
-                        " | ".join(str(value) for value in row),
-                    ))
-
-        self.table.setRowCount(len(results))
-
-        for row_idx, (bereich, excel_row, treffer, inhalt) in enumerate(results):
-            self.table.setItem(row_idx, 0, QTableWidgetItem(bereich))
-            self.table.setItem(row_idx, 1, QTableWidgetItem(str(excel_row)))
-            self.table.setItem(row_idx, 2, QTableWidgetItem(treffer))
-            self.table.setItem(row_idx, 3, QTableWidgetItem(inhalt))
 
 
 
@@ -3465,7 +3374,6 @@ class ZahlenAnalyseSeite(QWidget):
             QMessageBox.information(self, "Export", "Es gibt keine Zahlenanalyse zum Exportieren.")
             return
 
-        from datetime import datetime
 
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         default_name = EXPORT_DIR / f"zahlenanalyse_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
@@ -3565,10 +3473,24 @@ def objekt_buchhaltungsart() -> dict[str, str]:
     return mapping
 
 
+def ist_hausverwaltung_objekt(objekt: Any) -> bool:
+    """Ordnet sichtbare Fremdverwaltungsobjekte intern der HV-Buchhaltung zu."""
+    mapping = objekt_buchhaltungsart()
+    art = mapping.get(norm_key(objekt), "").lower().strip()
+    return (
+        "fremdverwaltung" in art
+        or "fremd verwaltung" in art
+        or "hausverwaltung" in art  # Kompatibilität zu bereits gespeicherten Werten
+        or art == "hv"
+    )
+
+
 def ist_eigenbestand_objekt(objekt: Any) -> bool:
     mapping = objekt_buchhaltungsart()
-    art = mapping.get(norm_key(objekt), "").lower()
-    return any(w in art for w in ["eigen", "eigene", "eigenbestand"])
+    art = mapping.get(norm_key(objekt), "").lower().strip()
+    if ist_hausverwaltung_objekt(objekt):
+        return False
+    return any(w in art for w in ["eigen", "eigene", "eigenbestand", "eigene buchhaltung"])
 
 
 def ist_versorger_kostenart(value: Any) -> bool:
@@ -3730,6 +3652,881 @@ def buchhaltung_summe(buchungen: list[dict[str, Any]], typ: str) -> float:
     return sum(float(b["betrag"]) for b in buchungen if b["typ"] == typ)
 
 
+LOHN_DATEI = APP_DIR / "lohnabrechnungen.json"
+
+
+def lade_lohnabrechnungen() -> list[dict[str, Any]]:
+    """Lädt Lohnabrechnungen aus einer separaten JSON-Datei; die Excel-Struktur bleibt unverändert."""
+    if not LOHN_DATEI.exists():
+        return []
+    try:
+        daten = json.loads(LOHN_DATEI.read_text(encoding="utf-8"))
+        return daten if isinstance(daten, list) else []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def speichere_lohnabrechnungen(daten: list[dict[str, Any]]) -> None:
+    LOHN_DATEI.write_text(json.dumps(daten, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def lohn_berechnen(d: dict[str, Any]) -> dict[str, float]:
+    brutto = max(0.0, to_float(d.get("brutto")))
+    steuer = max(0.0, to_float(d.get("lohnsteuer")))
+    soli = max(0.0, to_float(d.get("soli")))
+    kirche = max(0.0, to_float(d.get("kirchensteuer")))
+    kv_an = max(0.0, to_float(d.get("kv_an")))
+    rv_an = max(0.0, to_float(d.get("rv_an")))
+    av_an = max(0.0, to_float(d.get("av_an")))
+    pv_an = max(0.0, to_float(d.get("pv_an")))
+    sonstige = max(0.0, to_float(d.get("sonstige_abzuege")))
+    kv_ag = max(0.0, to_float(d.get("kv_ag")))
+    rv_ag = max(0.0, to_float(d.get("rv_ag")))
+    av_ag = max(0.0, to_float(d.get("av_ag")))
+    pv_ag = max(0.0, to_float(d.get("pv_ag")))
+    umlagen = max(0.0, to_float(d.get("umlagen_ag")))
+    netto = brutto - steuer - soli - kirche - kv_an - rv_an - av_an - pv_an - sonstige
+    ag_anteile = kv_ag + rv_ag + av_ag + pv_ag + umlagen
+    return {
+        "brutto": brutto,
+        "abzuege": steuer + soli + kirche + kv_an + rv_an + av_an + pv_an + sonstige,
+        "netto": netto,
+        "ag_anteile": ag_anteile,
+        "arbeitgeberkosten": brutto + ag_anteile,
+    }
+
+
+class LohnDialog(QDialog):
+    FELDER = [
+        ("mitarbeiter", "Mitarbeiter"), ("personalnummer", "Personalnummer"),
+        ("abrechnungsmonat", "Abrechnungsmonat (YYYY-MM)"), ("zahlungsdatum", "Zahlungsdatum"),
+        ("brutto", "Bruttolohn"), ("lohnsteuer", "Lohnsteuer"), ("soli", "Solidaritätszuschlag"),
+        ("kirchensteuer", "Kirchensteuer"), ("kv_an", "Krankenversicherung AN"),
+        ("rv_an", "Rentenversicherung AN"), ("av_an", "Arbeitslosenversicherung AN"),
+        ("pv_an", "Pflegeversicherung AN"), ("sonstige_abzuege", "Sonstige Abzüge"),
+        ("kv_ag", "Krankenversicherung AG"), ("rv_ag", "Rentenversicherung AG"),
+        ("av_ag", "Arbeitslosenversicherung AG"), ("pv_ag", "Pflegeversicherung AG"),
+        ("umlagen_ag", "Umlagen / BG AG"), ("kostenstelle", "Kostenstelle / Objekt"),
+        ("notiz", "Notiz"),
+    ]
+
+    def __init__(self, daten: dict[str, Any] | None = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Lohnabrechnung")
+        self.resize(720, 760)
+        root = QVBoxLayout(self)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        content = QWidget(); form = QFormLayout(content)
+        self.inputs: dict[str, QLineEdit] = {}
+        daten = daten or {}
+        for key, label in self.FELDER:
+            edit = QLineEdit(str(daten.get(key, "")))
+            self.inputs[key] = edit
+            form.addRow(label + ":", edit)
+        scroll.setWidget(content); root.addWidget(scroll, 1)
+        buttons = QHBoxLayout(); buttons.addStretch()
+        ok = QPushButton("Speichern"); ok.setObjectName("primaryButton"); ok.clicked.connect(self.accept)
+        cancel = QPushButton("Abbrechen"); cancel.clicked.connect(self.reject)
+        buttons.addWidget(ok); buttons.addWidget(cancel); root.addLayout(buttons)
+
+    def values(self) -> dict[str, Any]:
+        d = {key: edit.text().strip() for key, edit in self.inputs.items()}
+        d.update(lohn_berechnen(d))
+        return d
+
+
+class LohnabrechnungWidget(QWidget):
+    """Lohnabrechnungen mit manuellen gesetzlichen Abzügen, PDF- und DATEV-Export."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.daten = lade_lohnabrechnungen()
+        root = QVBoxLayout(self)
+        info = QLabel("Lohnabrechnungen: Brutto, Abzüge, Netto, Arbeitgeberanteile, PDF und DATEV-Buchungsstapel. Steuer- und SV-Werte werden aus der Lohnabrechnung übernommen und nicht steuerlich berechnet.")
+        info.setWordWrap(True); info.setObjectName("subTitle"); root.addWidget(info)
+        row = QHBoxLayout()
+        for text, slot, primary in [
+            ("Neu", self.neu, True), ("Bearbeiten", self.bearbeiten, False), ("Löschen", self.loeschen, False),
+            ("Abrechnung PDF", self.pdf_export, False), ("DATEV Export", self.datev_export, False),
+        ]:
+            b=QPushButton(text); b.clicked.connect(slot)
+            if primary: b.setObjectName("primaryButton")
+            row.addWidget(b)
+        row.addStretch(); root.addLayout(row)
+        self.table=QTableWidget(); root.addWidget(self.table,1)
+        self.laden()
+
+    def laden(self):
+        headers=["Monat","Mitarbeiter","Personalnr.","Brutto","Abzüge","Netto","AG-Anteile","Arbeitgeberkosten","Kostenstelle"]
+        self.table.setColumnCount(len(headers)); self.table.setHorizontalHeaderLabels(headers)
+        self.table.setRowCount(len(self.daten)); self.table.setAlternatingRowColors(True)
+        for r,d in enumerate(self.daten):
+            calc=lohn_berechnen(d)
+            vals=[d.get("abrechnungsmonat",""),d.get("mitarbeiter",""),d.get("personalnummer",""),
+                  f'{calc["brutto"]:.2f}',f'{calc["abzuege"]:.2f}',f'{calc["netto"]:.2f}',
+                  f'{calc["ag_anteile"]:.2f}',f'{calc["arbeitgeberkosten"]:.2f}',d.get("kostenstelle","")]
+            for c,v in enumerate(vals): self.table.setItem(r,c,QTableWidgetItem(str(v)))
+        for c,w in enumerate([90,200,100,100,100,100,110,130,180]): self.table.setColumnWidth(c,w)
+
+    def neu(self):
+        dlg=LohnDialog(parent=self)
+        if dlg.exec()==QDialog.DialogCode.Accepted:
+            self.daten.append(dlg.values()); speichere_lohnabrechnungen(self.daten); self.laden()
+
+    def _index(self) -> int:
+        return self.table.currentRow()
+
+    def bearbeiten(self):
+        i=self._index()
+        if i<0: QMessageBox.information(self,"Lohnabrechnung","Bitte eine Abrechnung auswählen."); return
+        dlg=LohnDialog(self.daten[i],self)
+        if dlg.exec()==QDialog.DialogCode.Accepted:
+            self.daten[i]=dlg.values(); speichere_lohnabrechnungen(self.daten); self.laden()
+
+    def loeschen(self):
+        i=self._index()
+        if i<0: return
+        if frage_ja_nein("Lohnabrechnung löschen","Ausgewählte Lohnabrechnung wirklich löschen?"):
+            self.daten.pop(i); speichere_lohnabrechnungen(self.daten); self.laden()
+
+    def pdf_export(self):
+        i=self._index()
+        if i<0: QMessageBox.information(self,"PDF","Bitte eine Abrechnung auswählen."); return
+        d=self.daten[i]; c=lohn_berechnen(d)
+        default=EXPORT_DIR / f"lohnabrechnung_{d.get('abrechnungsmonat','')}_{norm_key(d.get('mitarbeiter',''))}.pdf"
+        ziel,_=QFileDialog.getSaveFileName(self,"Lohnabrechnung PDF",str(default),"PDF-Dateien (*.pdf)")
+        if not ziel: return
+        if not ziel.lower().endswith('.pdf'): ziel += '.pdf'
+        rows=''.join(f"<tr><td>{html.escape(label)}</td><td style='text-align:right'>{html.escape(str(d.get(key,'')))}</td></tr>" for key,label in LohnDialog.FELDER if key not in {'notiz'})
+        rows += f"<tr><th>Netto</th><th style='text-align:right'>{euro(c['netto'])}</th></tr><tr><th>Arbeitgeberkosten</th><th style='text-align:right'>{euro(c['arbeitgeberkosten'])}</th></tr>"
+        doc=QTextDocument(); doc.setHtml(f"<h1>Lohnabrechnung</h1><h2>{html.escape(str(d.get('mitarbeiter','')))} – {html.escape(str(d.get('abrechnungsmonat','')))}</h2><table width='100%' cellspacing='4'>{rows}</table><p>{html.escape(str(d.get('notiz','')))}</p>")
+        printer=QPrinter(QPrinter.PrinterMode.HighResolution); printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat); printer.setOutputFileName(ziel); doc.print_(printer)
+        QMessageBox.information(self,"PDF",f"Lohnabrechnung erstellt:\n{ziel}")
+
+    def datev_export(self):
+        if not self.daten: QMessageBox.information(self,"DATEV","Keine Lohnabrechnungen vorhanden."); return
+        default=EXPORT_DIR / f"DATEV_Lohn_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
+        ziel,_=QFileDialog.getSaveFileName(self,"DATEV-Lohnexport",str(default),"CSV-Dateien (*.csv)")
+        if not ziel: return
+        if not ziel.lower().endswith('.csv'): ziel += '.csv'
+        headers=["Umsatz (ohne Soll/Haben-Kz)","Soll/Haben-Kennzeichen","WKZ Umsatz","Konto","Gegenkonto (ohne BU-Schlüssel)","Belegdatum","Belegfeld 1","Buchungstext","KOST1 - Kostenstelle"]
+        with open(ziel,'w',newline='',encoding='cp1252',errors='replace') as fh:
+            w=csv.writer(fh,delimiter=';',quotechar='"',quoting=csv.QUOTE_MINIMAL); w.writerow(headers)
+            for d in self.daten:
+                c=lohn_berechnen(d); beleg=str(d.get('zahlungsdatum') or d.get('abrechnungsmonat','')).replace('-','')[-4:]
+                name=str(d.get('mitarbeiter','')); monat=str(d.get('abrechnungsmonat','')); kost=str(d.get('kostenstelle',''))
+                buchungen=[
+                    (c['brutto'],'S','4120','1740',f'Bruttolohn {name} {monat}'),
+                    (c['ag_anteile'],'S','4130','1740',f'AG-Anteile {name} {monat}'),
+                    (c['netto'],'H','1740','1200',f'Nettolohn {name} {monat}'),
+                    (max(0.0,c['abzuege']),'H','1740','1740',f'Abzüge Lohn {name} {monat}'),
+                ]
+                for betrag,sh,konto,gk,text in buchungen:
+                    if betrag: w.writerow([f"{betrag:.2f}".replace('.',','),sh,'EUR',konto,gk,beleg,d.get('personalnummer',''),text,kost])
+        QMessageBox.information(self,"DATEV",f"DATEV-Lohnexport erstellt:\n{ziel}\n\nKonten 4120/4130/1740/1200 sind Standardvorgaben und müssen zum Kontenrahmen des Steuerbüros passen.")
+
+
+def exportiere_datev_buchungen(buchungen: list[dict[str, Any]], parent=None) -> None:
+    if not buchungen:
+        QMessageBox.information(parent, "DATEV", "Keine Buchungen zum Exportieren.")
+        return
+    default = EXPORT_DIR / f"DATEV_Buchhaltung_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.csv"
+    ziel, _ = QFileDialog.getSaveFileName(parent, "DATEV-Buchungsstapel", str(default), "CSV-Dateien (*.csv)")
+    if not ziel:
+        return
+    if not ziel.lower().endswith(".csv"):
+        ziel += ".csv"
+    headers = ["Umsatz (ohne Soll/Haben-Kz)", "Soll/Haben-Kennzeichen", "WKZ Umsatz", "Konto", "Gegenkonto (ohne BU-Schlüssel)", "Belegdatum", "Belegfeld 1", "Buchungstext", "KOST1 - Kostenstelle"]
+    with open(ziel, "w", newline="", encoding="cp1252", errors="replace") as fh:
+        writer = csv.writer(fh, delimiter=";", quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(headers)
+        for b in buchungen:
+            typ = str(b.get("typ", ""))
+            konto = "1200" if typ == "Einnahme" else "4900"
+            gegenkonto = "8400" if typ == "Einnahme" else "1200"
+            sh = "S" if typ == "Ausgabe" else "H"
+            datum = re.sub(r"[^0-9]", "", str(b.get("datum", "")))[-4:]
+            writer.writerow([
+                f"{float(b.get('betrag', 0)):.2f}".replace(".", ","), sh, "EUR", konto, gegenkonto,
+                datum, str(b.get("quelle", ""))[:36], str(b.get("zweck", ""))[:60], str(b.get("name", ""))[:36]
+            ])
+    QMessageBox.information(parent, "DATEV", f"DATEV-Buchungsstapel erstellt:\n{ziel}\n\nKonten 1200/8400/4900 sind Standardvorgaben und müssen zum Kontenrahmen des Steuerbüros passen.")
+
+
+
+
+STEUER_KATEGORIEN = {
+    "Miete": "Einnahmen Vermietung",
+    "Nebenkosten": "Nebenkostenvorauszahlungen",
+    "Betriebskosten": "Nebenkostenvorauszahlungen",
+    "Heizkosten": "Heizkostenvorauszahlungen",
+    "HV-Rechnung": "Erlöse Hausverwaltung",
+    "Rechnung": "Instandhaltung / Fremdleistungen",
+    "Grundsteuer": "Grundsteuer",
+    "Versicherung": "Versicherungen",
+    "Wasser": "Wasser / Abwasser",
+    "Abwasser": "Wasser / Abwasser",
+    "Müll": "Müllentsorgung",
+    "Strom": "Allgemeinstrom",
+    "Gas": "Heizung / Energie",
+    "Heizung": "Heizung / Energie",
+    "Hausmeister": "Hausmeister",
+    "Schornsteinfeger": "Schornsteinfeger",
+    "Reparatur": "Instandhaltung / Reparatur",
+    "Instandhaltung": "Instandhaltung / Reparatur",
+    "Zinsen": "Schuldzinsen",
+    "Tilgung": "Nicht abzugsfähige Tilgung",
+    "Software": "Software / EDV",
+    "Telefon": "Telefon / Internet",
+    "Porto": "Porto / Versand",
+    "Steuerberater": "Rechts- und Beratungskosten",
+}
+
+
+def steuer_kategorie(buchung: dict[str, Any]) -> str:
+    text = " ".join(str(buchung.get(k, "")) for k in ("kostenart", "zweck", "quelle")).lower()
+    for suchwort, kategorie in STEUER_KATEGORIEN.items():
+        if suchwort.lower() in text:
+            return kategorie
+    return "Sonstige Einnahmen" if buchung.get("typ") == "Einnahme" else "Sonstige Ausgaben"
+
+
+def steuer_bereich(buchung: dict[str, Any]) -> str:
+    quelle = str(buchung.get("quelle", "")).lower()
+    zweck = str(buchung.get("zweck", "")).lower()
+    if "hv" in quelle or "hausverwaltung" in quelle or "hv-" in zweck:
+        return "Hausverwaltung"
+    return "Eigenbestand"
+
+
+def steuer_jahresdaten(jahr: str) -> dict[str, Any]:
+    buchungen = buchhaltung_daten(jahr, "")
+    kategorien: dict[str, dict[str, float]] = {}
+    bereiche: dict[str, dict[str, float]] = {}
+    offene: list[dict[str, Any]] = []
+    beleglos: list[dict[str, Any]] = []
+    for b in buchungen:
+        kat = steuer_kategorie(b)
+        ber = steuer_bereich(b)
+        kategorien.setdefault(kat, {"Einnahme": 0.0, "Ausgabe": 0.0})
+        bereiche.setdefault(ber, {"Einnahme": 0.0, "Ausgabe": 0.0})
+        typ = str(b.get("typ", ""))
+        betrag = float(b.get("betrag", 0) or 0)
+        if typ in ("Einnahme", "Ausgabe"):
+            kategorien[kat][typ] += betrag
+            bereiche[ber][typ] += betrag
+        status = str(b.get("status", "")).lower()
+        if "offen" in status or "fällig" in status or "faellig" in status:
+            offene.append(b)
+        if not str(b.get("quelle", "")).strip() or not str(b.get("datum", "")).strip():
+            beleglos.append(b)
+    lohn = []
+    for d in lade_lohnabrechnungen():
+        monat = str(d.get("abrechnungsmonat", ""))
+        if jahr and not monat.startswith(jahr):
+            continue
+        c = lohn_berechnen(d)
+        lohn.append({**d, **c})
+    return {"jahr": jahr, "buchungen": buchungen, "kategorien": kategorien, "bereiche": bereiche,
+            "offene": offene, "beleglos": beleglos, "lohn": lohn}
+
+
+def _sheet_breite(ws: Worksheet) -> None:
+    for idx, col in enumerate(ws.columns, start=1):
+        maxlen = 0
+        for cell in col:
+            maxlen = max(maxlen, len(excel_text(cell.value)))
+        ws.column_dimensions[get_column_letter(idx)].width = min(max(maxlen + 2, 12), 45)
+
+
+def exportiere_steuerberater_paket(jahr: str, parent=None) -> None:
+    if not jahr:
+        QMessageBox.information(parent, "Jahresabschluss", "Bitte ein Jahr auswählen.")
+        return
+    daten = steuer_jahresdaten(jahr)
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    ziel_text, _ = QFileDialog.getSaveFileName(parent, "Steuerberater-Paket speichern",
+        str(EXPORT_DIR / f"Steuerberater_Paket_{jahr}.zip"), "ZIP-Dateien (*.zip)")
+    if not ziel_text:
+        return
+    ziel = Path(ziel_text)
+    if ziel.suffix.lower() != ".zip":
+        ziel = ziel.with_suffix(".zip")
+    tmp = EXPORT_DIR / f"steuerberater_{jahr}_temp"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    tmp.mkdir(parents=True, exist_ok=True)
+
+    wb = Workbook(); ws = wb.active
+    assert isinstance(ws, Worksheet)
+    ws.title = "Jahresübersicht"
+    ws.append(["Bereich", "Einnahmen", "Ausgaben", "Ergebnis"])
+    for ber, vals in sorted(daten["bereiche"].items()):
+        ws.append([ber, vals["Einnahme"], vals["Ausgabe"], vals["Einnahme"]-vals["Ausgabe"]])
+    ws.append([]); ws.append(["Steuerkategorie", "Einnahmen", "Ausgaben", "Saldo"])
+    for kat, vals in sorted(daten["kategorien"].items()):
+        ws.append([kat, vals["Einnahme"], vals["Ausgabe"], vals["Einnahme"]-vals["Ausgabe"]])
+    _sheet_breite(ws)
+
+    ws2 = wb.create_sheet("Buchungen")
+    ws2.append(["Datum","Typ","Bereich","Steuerkategorie","Name","Kostenart","Status","Betrag","Quelle","Zweck"])
+    for b in daten["buchungen"]:
+        ws2.append([b.get("datum",""), b.get("typ",""), steuer_bereich(b), steuer_kategorie(b),
+                    b.get("name",""), b.get("kostenart",""), b.get("status",""), float(b.get("betrag",0) or 0),
+                    b.get("quelle",""), b.get("zweck","")])
+    _sheet_breite(ws2)
+
+    ws3 = wb.create_sheet("Offene Posten")
+    ws3.append(["Datum","Typ","Name","Betrag","Status","Quelle","Zweck"])
+    for b in daten["offene"]:
+        ws3.append([b.get("datum",""),b.get("typ",""),b.get("name",""),float(b.get("betrag",0) or 0),b.get("status",""),b.get("quelle",""),b.get("zweck","")])
+    _sheet_breite(ws3)
+
+    ws4 = wb.create_sheet("Lohn")
+    ws4.append(["Monat","Mitarbeiter","Personalnummer","Brutto","Abzüge","Netto","AG-Anteile","Arbeitgeberkosten","Kostenstelle"])
+    for d in daten["lohn"]:
+        ws4.append([d.get("abrechnungsmonat",""),d.get("mitarbeiter",""),d.get("personalnummer",""),d.get("brutto",0),d.get("abzuege",0),d.get("netto",0),d.get("ag_anteile",0),d.get("arbeitgeberkosten",0),d.get("kostenstelle","")])
+    _sheet_breite(ws4)
+    xlsx = tmp / f"Jahresabschluss_{jahr}.xlsx"; wb.save(xlsx)
+
+    # DATEV-nahe Buchungsdatei ohne Dialog
+    csv_path = tmp / f"DATEV_Buchungen_{jahr}.csv"
+    headers=["Umsatz (ohne Soll/Haben-Kz)","Soll/Haben-Kennzeichen","WKZ Umsatz","Konto","Gegenkonto (ohne BU-Schlüssel)","Belegdatum","Belegfeld 1","Buchungstext","KOST1 - Kostenstelle"]
+    with csv_path.open("w", newline="", encoding="cp1252", errors="replace") as fh:
+        w=csv.writer(fh, delimiter=";", quotechar='"', quoting=csv.QUOTE_MINIMAL); w.writerow(headers)
+        for b in daten["buchungen"]:
+            typ=str(b.get("typ","")); konto="1200" if typ=="Einnahme" else "4900"; gegen="8400" if typ=="Einnahme" else "1200"; sh="H" if typ=="Einnahme" else "S"
+            datum=re.sub(r"[^0-9]", "", str(b.get("datum","")))[-4:]
+            w.writerow([f"{float(b.get('betrag',0) or 0):.2f}".replace(".",","),sh,"EUR",konto,gegen,datum,str(b.get("quelle",""))[:36],str(b.get("zweck",""))[:60],steuer_bereich(b)])
+
+    (tmp / "Hinweise.txt").write_text(
+        "Steuerberater-Paket für " + jahr + "\n\n"
+        "Enthalten: Jahresübersicht, Buchungen, offene Posten, Lohnübersicht und DATEV-nahe CSV.\n"
+        "Die Konten 1200/8400/4900 sowie steuerliche Einordnungen sind Vorschläge und müssen vom Steuerbüro geprüft werden.\n"
+        "Tilgungen, Abschreibungen, private Anteile und Umsatzsteuer-Sachverhalte sind anhand der Originalbelege endgültig zu beurteilen.\n",
+        encoding="utf-8")
+    (tmp / "Pruefbericht.json").write_text(json.dumps({
+        "jahr":jahr, "buchungen":len(daten["buchungen"]), "offene_posten":len(daten["offene"]),
+        "unvollstaendige_buchungen":len(daten["beleglos"]), "lohnabrechnungen":len(daten["lohn"])
+    }, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    with zipfile.ZipFile(ziel, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in tmp.rglob("*"):
+            if f.is_file(): zf.write(f, f.relative_to(tmp))
+    shutil.rmtree(tmp, ignore_errors=True)
+    QMessageBox.information(parent, "Jahresabschluss", f"Steuerberater-Paket erstellt:\n{ziel}")
+
+
+class JahresabschlussWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        root=QVBoxLayout(self)
+        info=QLabel("Jahresabschluss-Vorbereitung für Eigenbestand und Hausverwaltung: Steuerkategorien, offene Posten, Lohnkosten und Steuerberater-Paket.")
+        info.setWordWrap(True); info.setObjectName("subTitle"); root.addWidget(info)
+        row=QHBoxLayout(); self.jahr=QComboBox(); self.jahr.addItem("")
+        jahre=set()
+        for b in buchhaltung_daten("", ""):
+            if str(b.get("jahr","")).strip(): jahre.add(str(b.get("jahr")).strip())
+        for d in lade_lohnabrechnungen():
+            m=str(d.get("abrechnungsmonat",""));
+            if len(m)>=4: jahre.add(m[:4])
+        for j in sorted(jahre): self.jahr.addItem(j)
+        laden=QPushButton("Auswerten"); laden.setObjectName("primaryButton"); laden.clicked.connect(self.laden)
+        paket=QPushButton("Steuerberater-Paket ZIP"); paket.clicked.connect(lambda: exportiere_steuerberater_paket(self.jahr.currentText().strip(), self))
+        row.addWidget(QLabel("Jahr:")); row.addWidget(self.jahr); row.addWidget(laden); row.addWidget(paket); row.addStretch(); root.addLayout(row)
+        self.summary=QLabel("Bitte Jahr auswählen."); self.summary.setObjectName("metricValue"); root.addWidget(self.summary)
+        self.tabs=QTabWidget(); root.addWidget(self.tabs,1)
+        self.kat=QTableWidget(); self.ber=QTableWidget(); self.pruef=QTableWidget()
+        self.tabs.addTab(self.kat,"Steuerkategorien"); self.tabs.addTab(self.ber,"Bereiche"); self.tabs.addTab(self.pruef,"Prüfung")
+
+    def laden(self):
+        jahr=self.jahr.currentText().strip()
+        if not jahr: QMessageBox.information(self,"Jahresabschluss","Bitte Jahr auswählen."); return
+        d=steuer_jahresdaten(jahr)
+        ein=sum(v["Einnahme"] for v in d["bereiche"].values()); aus=sum(v["Ausgabe"] for v in d["bereiche"].values())
+        lohn=sum(float(x.get("arbeitgeberkosten",0) or 0) for x in d["lohn"])
+        self.summary.setText(f"Einnahmen {euro(ein)} | Ausgaben {euro(aus)} | Ergebnis {euro(ein-aus)} | Arbeitgeberkosten {euro(lohn)}")
+        rows=sorted(d["kategorien"].items()); self.kat.setColumnCount(4); self.kat.setHorizontalHeaderLabels(["Steuerkategorie","Einnahmen","Ausgaben","Saldo"]); self.kat.setRowCount(len(rows))
+        for r,(k,v) in enumerate(rows):
+            for c,x in enumerate([k,euro(v["Einnahme"]),euro(v["Ausgabe"]),euro(v["Einnahme"]-v["Ausgabe"])]): self.kat.setItem(r,c,QTableWidgetItem(str(x)))
+        rows2=sorted(d["bereiche"].items()); self.ber.setColumnCount(4); self.ber.setHorizontalHeaderLabels(["Bereich","Einnahmen","Ausgaben","Ergebnis"]); self.ber.setRowCount(len(rows2))
+        for r,(k,v) in enumerate(rows2):
+            for c,x in enumerate([k,euro(v["Einnahme"]),euro(v["Ausgabe"]),euro(v["Einnahme"]-v["Ausgabe"])]): self.ber.setItem(r,c,QTableWidgetItem(str(x)))
+        checks=[("Buchungen",len(d["buchungen"])),("Offene Posten",len(d["offene"])),("Unvollständige Buchungen",len(d["beleglos"])),("Lohnabrechnungen",len(d["lohn"]))]
+        self.pruef.setColumnCount(2); self.pruef.setHorizontalHeaderLabels(["Prüfpunkt","Anzahl"]); self.pruef.setRowCount(len(checks))
+        for r,(k,v) in enumerate(checks): self.pruef.setItem(r,0,QTableWidgetItem(k)); self.pruef.setItem(r,1,QTableWidgetItem(str(v)))
+
+
+
+# ========================= VERSION 10.0: FINANZCENTER =========================
+FINANZCENTER_DIR = APP_DIR / "finanzcenter"
+FINANZCENTER_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _json_laden(path: Path, standard: Any) -> Any:
+    try:
+        if not path.exists():
+            return standard
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return standard
+
+
+def _json_speichern(path: Path, daten: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(daten, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+class FinanzRegisterWidget(QWidget):
+    """Kompakter JSON-basierter Stammdateneditor ohne Änderung der Excel-Struktur."""
+    def __init__(self, titel: str, dateiname: str, felder: list[str], parent=None):
+        super().__init__(parent)
+        self.titel, self.felder = titel, felder
+        self.path = FINANZCENTER_DIR / dateiname
+        self.daten: list[dict[str, str]] = _json_laden(self.path, [])
+        lay = QVBoxLayout(self)
+        info = QLabel(f"{titel}: steuerlich relevante Zusatzdaten. Speicherung separat, Excel-Struktur bleibt unverändert.")
+        info.setObjectName("subTitle"); lay.addWidget(info)
+        bar=QHBoxLayout()
+        for label, fn, primary in [("Neu", self.neu, True),("Bearbeiten", self.bearbeiten, False),("Löschen", self.loeschen, False),("CSV Export", self.export_csv, False)]:
+            b=QPushButton(label); b.clicked.connect(fn)
+            if primary: b.setObjectName("primaryButton")
+            bar.addWidget(b)
+        bar.addStretch(); lay.addLayout(bar)
+        self.table=QTableWidget(); self.table.setAlternatingRowColors(True); lay.addWidget(self.table,1)
+        self.aktualisieren()
+
+    def aktualisieren(self):
+        self.table.setColumnCount(len(self.felder)); self.table.setHorizontalHeaderLabels(self.felder)
+        self.table.setRowCount(len(self.daten))
+        for r,d in enumerate(self.daten):
+            for c,f in enumerate(self.felder): self.table.setItem(r,c,QTableWidgetItem(str(d.get(f,""))))
+        self.table.resizeColumnsToContents()
+
+    def _dialog(self, data=None):
+        dlg=EingabeDialog(self.titel, self.felder, [str((data or {}).get(f,"")) for f in self.felder])
+        if dlg.exec()!=QDialog.DialogCode.Accepted: return None
+        vals=dlg.values(); return {f:(vals[i] if i<len(vals) else "") for i,f in enumerate(self.felder)}
+
+    def neu(self):
+        d=self._dialog()
+        if d is not None: self.daten.append(d); _json_speichern(self.path,self.daten); self.aktualisieren()
+
+    def bearbeiten(self):
+        i=self.table.currentRow()
+        if i<0: QMessageBox.information(self,self.titel,"Bitte einen Datensatz auswählen."); return
+        d=self._dialog(self.daten[i])
+        if d is not None: self.daten[i]=d; _json_speichern(self.path,self.daten); self.aktualisieren()
+
+    def loeschen(self):
+        i=self.table.currentRow()
+        if i>=0 and frage_ja_nein(self.titel,"Ausgewählten Datensatz wirklich löschen?"):
+            del self.daten[i]; _json_speichern(self.path,self.daten); self.aktualisieren()
+
+    def export_csv(self):
+        if not self.daten: QMessageBox.information(self,"Export","Keine Daten vorhanden."); return
+        ziel,_=QFileDialog.getSaveFileName(self,"CSV exportieren",str(EXPORT_DIR/f"{norm_key(self.titel)}_{datetime.now():%Y-%m-%d}.csv"),"CSV (*.csv)")
+        if not ziel: return
+        with open(ziel,"w",newline="",encoding="utf-8-sig") as fh:
+            w=csv.DictWriter(fh,fieldnames=self.felder,delimiter=";"); w.writeheader(); w.writerows(self.daten)
+        QMessageBox.information(self,"Export",f"Export erstellt:\n{ziel}")
+
+
+class AnlagenverzeichnisWidget(FinanzRegisterWidget):
+    def __init__(self,parent=None):
+        super().__init__("Anlagenverzeichnis","anlagen.json",["Anlage","Bereich","Objekt","Anschaffungsdatum","Anschaffungskosten","Nutzungsdauer Jahre","AfA-Methode","Restbuchwert","Beleg/PDF","Notiz"],parent)
+        btn=QPushButton("AfA neu berechnen"); btn.clicked.connect(self.afa_berechnen); self.layout().insertWidget(2,btn)
+    def afa_berechnen(self):
+        jahr=datetime.now().year
+        for d in self.daten:
+            kosten=to_float(d.get("Anschaffungskosten")); dauer=max(1,to_float(d.get("Nutzungsdauer Jahre"),1))
+            try: start=int(str(d.get("Anschaffungsdatum",jahr))[:4])
+            except ValueError: start=jahr
+            afa=kosten/dauer; vergangen=max(0,min(dauer,jahr-start+1)); d["Restbuchwert"]=f"{max(0,kosten-afa*vergangen):.2f}"
+        _json_speichern(self.path,self.daten); self.aktualisieren(); QMessageBox.information(self,"AfA","Lineare AfA-Vorschau aktualisiert. Steuerliche Prüfung bleibt erforderlich.")
+
+
+class UmsatzsteuerWidget(QWidget):
+    def __init__(self,parent=None):
+        super().__init__(parent); lay=QVBoxLayout(self)
+        info=QLabel("Umsatzsteuer-Auswertung aus den vorhandenen Buchungen. Steuersätze werden aus MwSt.-Feldern bzw. Beträgen abgeleitet."); info.setObjectName("subTitle"); lay.addWidget(info)
+        bar=QHBoxLayout(); self.jahr=QComboBox(); self.jahr.addItems([str(y) for y in range(datetime.now().year-8,datetime.now().year+2)]); self.jahr.setCurrentText(str(datetime.now().year))
+        b=QPushButton("Berechnen"); b.setObjectName("primaryButton"); b.clicked.connect(self.laden); bar.addWidget(QLabel("Jahr:")); bar.addWidget(self.jahr); bar.addWidget(b); bar.addStretch(); lay.addLayout(bar)
+        self.table=QTableWidget(); lay.addWidget(self.table,1); self.summe=QLabel(); self.summe.setObjectName("metricValue"); lay.addWidget(self.summe); self.laden()
+    def laden(self):
+        jahr=self.jahr.currentText(); gruppen={"0 %":[0,0],"7 %":[0,0],"19 %":[0,0]}
+        for b in buchhaltung_daten(jahr,""):
+            betrag=abs(to_float(b.get("betrag"))); art=str(b.get("art","")).lower(); text=" ".join(str(v) for v in b.values()).lower()
+            satz="7 %" if "7 %" in text or "7%" in text else "0 %" if "steuerfrei" in text or "0 %" in text else "19 %"
+            steuer=betrag*(7/107 if satz=="7 %" else 19/119 if satz=="19 %" else 0)
+            idx=0 if "einnah" in art else 1; gruppen[satz][idx]+=steuer
+        self.table.setColumnCount(4); self.table.setHorizontalHeaderLabels(["Steuersatz","Umsatzsteuer","Vorsteuer","Zahllast"]); self.table.setRowCount(3)
+        ust=vor=0
+        for r,(satz,(u,v)) in enumerate(gruppen.items()):
+            ust+=u; vor+=v
+            for c,x in enumerate([satz,euro(u),euro(v),euro(u-v)]): self.table.setItem(r,c,QTableWidgetItem(str(x)))
+        self.summe.setText(f"Voraussichtliche Zahllast: {euro(ust-vor)}")
+
+
+class BelegAssistentWidget(QWidget):
+    def __init__(self,parent=None):
+        super().__init__(parent); lay=QVBoxLayout(self)
+        info=QLabel("Beleg-Assistent: liest PDF-Text lokal aus und schlägt Lieferant, Betrag, Rechnungsnummer, Kostenart und DATEV-Konto vor."); info.setObjectName("subTitle"); lay.addWidget(info)
+        bar=QHBoxLayout(); b=QPushButton("PDF analysieren"); b.setObjectName("primaryButton"); b.clicked.connect(self.analysieren); bar.addWidget(b); bar.addStretch(); lay.addLayout(bar)
+        self.result=QTableWidget(); lay.addWidget(self.result,1)
+    def analysieren(self):
+        if PdfReader is None: QMessageBox.warning(self,"PDF","pypdf ist nicht installiert."); return
+        path,_=QFileDialog.getOpenFileName(self,"Beleg auswählen","","PDF (*.pdf)")
+        if not path:return
+        try:
+            reader=PdfReader(path); text="\n".join((p.extract_text() or "") for p in reader.pages[:8])
+        except Exception as exc: QMessageBox.warning(self,"PDF",str(exc)); return
+        lower=text.lower(); nummer=re.search(r"(?:rechnungs(?:nummer|nr\.?|nr)|belegnummer)\s*[:#]?\s*([\w\-/]+)",text,re.I)
+        amounts=re.findall(r"(?<!\d)(\d{1,3}(?:\.\d{3})*,\d{2}|\d+[.,]\d{2})\s*(?:€|eur)",text,re.I)
+        betrag=max((to_float(a) for a in amounts),default=0.0)
+        regeln=[("schornstein","Schornsteinfeger","4200"),("versicherung","Versicherung","4360"),("grundsteuer","Grundsteuer","4510"),("wasser","Wasser/Abwasser","4240"),("strom","Strom","4240"),("reparatur","Instandhaltung","4805"),("wartung","Wartung","4805"),("software","Software","4964")]
+        kostenart,konto="Sonstige Kosten","4900"
+        for key,art,kto in regeln:
+            if key in lower: kostenart,konto=art,kto; break
+        lines=[x.strip() for x in text.splitlines() if x.strip()]; lieferant=lines[0][:100] if lines else Path(path).stem
+        daten=[("PDF",path),("Lieferant (Vorschlag)",lieferant),("Rechnungsnummer",nummer.group(1) if nummer else ""),("Bruttobetrag",euro(betrag)),("Kostenart",kostenart),("DATEV-Konto Vorschlag",konto),("Hinweis","Vorschläge vor Buchung fachlich prüfen")]
+        self.result.setColumnCount(2); self.result.setHorizontalHeaderLabels(["Feld","Erkannt/Vorschlag"]); self.result.setRowCount(len(daten))
+        for r,(k,v) in enumerate(daten): self.result.setItem(r,0,QTableWidgetItem(k)); self.result.setItem(r,1,QTableWidgetItem(str(v)))
+        self.result.resizeColumnsToContents()
+
+
+class SteuercenterWidget(QWidget):
+    def __init__(self,parent=None):
+        super().__init__(parent); lay=QVBoxLayout(self)
+        info=QLabel("Steuercenter: EÜR-nahe Übersicht, Werbungskosten, Lohn, AfA, Darlehenszinsen und Jahresakte."); info.setObjectName("subTitle"); lay.addWidget(info)
+        bar=QHBoxLayout(); self.jahr=QComboBox(); self.jahr.addItems([str(y) for y in range(datetime.now().year-8,datetime.now().year+2)]); self.jahr.setCurrentText(str(datetime.now().year))
+        b=QPushButton("Auswertung"); b.setObjectName("primaryButton"); b.clicked.connect(self.laden); paket=QPushButton("Komplette Jahresakte ZIP"); paket.clicked.connect(self.paket)
+        bar.addWidget(QLabel("Steuerjahr:")); bar.addWidget(self.jahr); bar.addWidget(b); bar.addWidget(paket); bar.addStretch(); lay.addLayout(bar)
+        self.table=QTableWidget(); lay.addWidget(self.table,1); self.laden()
+    def laden(self):
+        jahr=self.jahr.currentText(); b=buchhaltung_daten(jahr,""); ein=sum(abs(to_float(x.get("betrag"))) for x in b if "einnah" in str(x.get("typ", x.get("art", ""))).lower()); aus=sum(abs(to_float(x.get("betrag"))) for x in b if "ausgab" in str(x.get("typ", x.get("art", ""))).lower())
+        lohn=sum(to_float(x.get("arbeitgeberkosten")) for x in lade_lohnabrechnungen() if jahr in str(x.get("abrechnungsmonat","")))
+        anlagen=_json_laden(FINANZCENTER_DIR/"anlagen.json",[]); afa=sum(to_float(x.get("Anschaffungskosten"))/max(1,to_float(x.get("Nutzungsdauer Jahre"),1)) for x in anlagen)
+        darlehen=_json_laden(FINANZCENTER_DIR/"darlehen.json",[]); zinsen=sum(to_float(x.get("Zinsen Jahr")) for x in darlehen if not x.get("Jahr") or str(x.get("Jahr"))==jahr)
+        rows=[("Einnahmen",ein),("Ausgaben laufend",aus),("Arbeitgeberkosten",lohn),("AfA-Vorschau",afa),("Darlehenszinsen",zinsen),("Vorläufiges Ergebnis",ein-aus-lohn-afa-zinsen)]
+        self.table.setColumnCount(2); self.table.setHorizontalHeaderLabels(["Position","Betrag"]); self.table.setRowCount(len(rows))
+        for r,(k,v) in enumerate(rows): self.table.setItem(r,0,QTableWidgetItem(k)); self.table.setItem(r,1,QTableWidgetItem(euro(v)))
+    def paket(self):
+        exportiere_steuerberater_paket(self.jahr.currentText(),self)
+
+
+
+# -----------------------------------------------------------------------------
+# Professionelles Übergabecenter für Lohnbüro und Steuerberater
+# Speicherung ausschließlich in JSON unter finanzcenter; die Excel-Schemata
+# SCHEMA und DATA_FILES bleiben unverändert.
+# -----------------------------------------------------------------------------
+PERSONALSTAMM_DATEI = FINANZCENTER_DIR / "personalstamm.json"
+LOHNBEWEGUNGEN_DATEI = FINANZCENTER_DIR / "lohnbewegungen.json"
+STAMMDATENAENDERUNGEN_DATEI = FINANZCENTER_DIR / "stammdatenaenderungen.json"
+
+
+def _json_liste_laden(path: Path) -> list[dict[str, Any]]:
+    daten = _json_laden(path, [])
+    return daten if isinstance(daten, list) else []
+
+
+def _json_liste_speichern(path: Path, daten: list[dict[str, Any]]) -> None:
+    _json_speichern(path, daten)
+
+
+class DatensatzDialog(QDialog):
+    """Generischer, scrollbarer JSON-Datensatzdialog ohne Excel-Änderung."""
+    def __init__(self, titel: str, felder: list[tuple[str, str]], daten: dict[str, Any] | None = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(titel)
+        self.resize(760, 780)
+        self.felder = felder
+        self.inputs: dict[str, QWidget] = {}
+        daten = daten or {}
+        root = QVBoxLayout(self)
+        title = QLabel(titel); title.setObjectName("pageTitle"); root.addWidget(title)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        content = QWidget(); form = QFormLayout(content)
+        multiline = {"notiz", "aenderung", "hinweis", "beschreibung"}
+        for key, label in felder:
+            if key in multiline:
+                widget = QTextEdit(str(daten.get(key, ""))); widget.setMinimumHeight(90)
+            elif key in {"status", "beschaeftigungsart", "abrechnungsstatus"}:
+                widget = QComboBox()
+                werte = ["", "Aktiv", "Inaktiv", "Vorbereitet", "Geprüft", "Freigegeben", "Übergeben", "Abgerechnet",
+                         "Vollzeit", "Teilzeit", "Minijob", "Kurzfristig", "Ausbildung", "Werkstudent"]
+                widget.addItems(werte); widget.setCurrentText(str(daten.get(key, "")))
+            else:
+                widget = QLineEdit(str(daten.get(key, "")))
+                if key in {"steuer_id", "sv_nummer", "iban"}: widget.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+            self.inputs[key] = widget
+            form.addRow(label + ":", widget)
+        scroll.setWidget(content); root.addWidget(scroll, 1)
+        buttons = QHBoxLayout(); buttons.addStretch()
+        ok = QPushButton("Speichern"); ok.setObjectName("primaryButton"); ok.clicked.connect(self.accept)
+        cancel = QPushButton("Abbrechen"); cancel.clicked.connect(self.reject)
+        buttons.addWidget(ok); buttons.addWidget(cancel); root.addLayout(buttons)
+
+    def values(self) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, _label in self.felder:
+            widget = self.inputs[key]
+            if isinstance(widget, QTextEdit): result[key] = widget.toPlainText().strip()
+            elif isinstance(widget, QComboBox): result[key] = widget.currentText().strip()
+            else: result[key] = widget.text().strip()
+        return result
+
+
+class JsonRegisterWidget(QWidget):
+    def __init__(self, titel: str, path: Path, felder: list[tuple[str, str]], parent=None):
+        super().__init__(parent)
+        self.titel, self.path, self.felder = titel, path, felder
+        self.daten = _json_liste_laden(path)
+        root = QVBoxLayout(self)
+        info = QLabel(f"{titel}: lokale Zusatzdaten für die strukturierte Übergabe. Keine Änderung der Excel-Tabellen.")
+        info.setWordWrap(True); info.setObjectName("subTitle"); root.addWidget(info)
+        row = QHBoxLayout()
+        for text, slot, primary in [("Neu", self.neu, True), ("Bearbeiten", self.bearbeiten, False), ("Löschen", self.loeschen, False), ("Excel Export", self.excel_export, False)]:
+            b = QPushButton(text); b.clicked.connect(slot)
+            if primary: b.setObjectName("primaryButton")
+            row.addWidget(b)
+        row.addStretch(); root.addLayout(row)
+        self.table = QTableWidget(); root.addWidget(self.table, 1)
+        self.laden()
+
+    def laden(self):
+        labels = [label for _key, label in self.felder]
+        self.table.setColumnCount(len(labels)); self.table.setHorizontalHeaderLabels(labels)
+        self.table.setRowCount(len(self.daten)); self.table.setAlternatingRowColors(True)
+        for r, d in enumerate(self.daten):
+            for c, (key, _label) in enumerate(self.felder):
+                wert = str(d.get(key, ""))
+                if key in {"steuer_id", "sv_nummer", "iban"} and wert: wert = "••••" + wert[-4:]
+                self.table.setItem(r, c, QTableWidgetItem(wert))
+        self.table.resizeColumnsToContents()
+
+    def _index(self): return self.table.currentRow()
+    def neu(self):
+        dlg = DatensatzDialog(self.titel, self.felder, parent=self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.daten.append(dlg.values()); _json_liste_speichern(self.path, self.daten); self.laden()
+    def bearbeiten(self):
+        i = self._index()
+        if i < 0: QMessageBox.information(self, self.titel, "Bitte einen Datensatz auswählen."); return
+        dlg = DatensatzDialog(self.titel, self.felder, self.daten[i], self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.daten[i] = dlg.values(); _json_liste_speichern(self.path, self.daten); self.laden()
+    def loeschen(self):
+        i = self._index()
+        if i >= 0 and frage_ja_nein(self.titel, "Ausgewählten Datensatz wirklich löschen?"):
+            self.daten.pop(i); _json_liste_speichern(self.path, self.daten); self.laden()
+    def excel_export(self):
+        if not self.daten: QMessageBox.information(self, "Export", "Keine Daten vorhanden."); return
+        ziel, _ = QFileDialog.getSaveFileName(self, "Excel Export", str(EXPORT_DIR / (norm_key(self.titel) + ".xlsx")), "Excel (*.xlsx)")
+        if not ziel: return
+        if not ziel.lower().endswith('.xlsx'): ziel += '.xlsx'
+        wb = Workbook(); ws = wb.active; ws.title = self.titel[:31]
+        ws.append([label for _key, label in self.felder])
+        for d in self.daten: ws.append([d.get(key, "") for key, _label in self.felder])
+        for i, _ in enumerate(ws.columns, 1): ws.column_dimensions[get_column_letter(i)].width = 24
+        wb.save(ziel); QMessageBox.information(self, "Export", f"Export erstellt:\n{ziel}")
+
+
+PERSONAL_FELDER = [
+    ("personalnummer", "Personalnummer"), ("name", "Name"), ("geburtsdatum", "Geburtsdatum"),
+    ("adresse", "Adresse"), ("steuer_id", "Steuer-ID"), ("steuerklasse", "Steuerklasse"),
+    ("kinderfreibetrag", "Kinderfreibetrag"), ("konfession", "Konfession"),
+    ("sv_nummer", "Sozialversicherungsnummer"), ("krankenkasse", "Krankenkasse"),
+    ("beschaeftigungsart", "Beschäftigungsart"), ("eintritt", "Eintritt"), ("austritt", "Austritt"),
+    ("wochenstunden", "Wochenstunden"), ("stundenlohn", "Stundenlohn"), ("monatsgehalt", "Monatsgehalt"),
+    ("iban", "IBAN"), ("kostenstelle", "Kostenstelle / Objekt"), ("status", "Status"), ("notiz", "Notiz")]
+
+BEWEGUNGS_FELDER = [
+    ("abrechnungsmonat", "Abrechnungsmonat YYYY-MM"), ("personalnummer", "Personalnummer"),
+    ("mitarbeiter", "Mitarbeiter"), ("sollstunden", "Sollstunden"), ("iststunden", "Iststunden"),
+    ("ueberstunden", "Überstunden"), ("urlaubstage", "Urlaubstage"), ("krankheitstage", "Krankheitstage"),
+    ("zuschlaege", "Zuschläge EUR"), ("praemie", "Prämie EUR"), ("sachbezug", "Sachbezug EUR"),
+    ("fahrtkosten", "Fahrtkostenzuschuss EUR"), ("einmalzahlung", "Einmalzahlung EUR"),
+    ("stammdaten_geaendert", "Stammdaten geändert Ja/Nein"), ("abrechnungsstatus", "Abrechnungsstatus"),
+    ("notiz", "Notiz")]
+
+AENDERUNGS_FELDER = [
+    ("gueltig_ab", "Gültig ab"), ("personalnummer", "Personalnummer"), ("mitarbeiter", "Mitarbeiter"),
+    ("feld", "Geändertes Feld"), ("alt", "Alter Wert"), ("neu", "Neuer Wert"),
+    ("gemeldet_am", "Gemeldet am"), ("status", "Status"), ("aenderung", "Beschreibung / Hinweis")]
+
+
+class LohnbueroCenterWidget(QWidget):
+    """Vorbereitung und strukturierte Übergabe an externe/interne Lohnbuchhaltung."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+
+        # Der komplette Center-Inhalt liegt in einem echten Scrollbereich. Dadurch
+        # bleiben Kopfzeile, Aktionen und Register auch auf kleineren Bildschirmen
+        # sowie bei hoher Windows-Anzeigeskalierung vollständig erreichbar.
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        content = QWidget()
+        content.setMinimumWidth(760)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(18, 18, 18, 18)
+        content_layout.setSpacing(12)
+
+        title = QLabel("Lohnbüro-Center")
+        title.setObjectName("pageTitle")
+        content_layout.addWidget(title)
+
+        info = QLabel("Personalstamm, Monatsbewegungen, Änderungen und vorhandene Lohnabrechnungen werden zu einem prüfbaren Übergabepaket zusammengeführt. Gesetzliche Lohnberechnungen erfolgen weiterhin im eingesetzten Lohnsystem.")
+        info.setWordWrap(True)
+        info.setObjectName("subTitle")
+        content_layout.addWidget(info)
+
+        bar = QHBoxLayout()
+        self.monat = QLineEdit(datetime.now().strftime('%Y-%m'))
+        self.monat.setMaximumWidth(120)
+        paket = QPushButton("Lohnbüro-Paket erstellen")
+        paket.setObjectName("primaryButton")
+        paket.clicked.connect(self.export_paket)
+        pruefen = QPushButton("Vollständigkeit prüfen")
+        pruefen.clicked.connect(self.pruefen)
+        bar.addWidget(QLabel("Monat:"))
+        bar.addWidget(self.monat)
+        bar.addWidget(pruefen)
+        bar.addWidget(paket)
+        bar.addStretch()
+        content_layout.addLayout(bar)
+
+        self.tabs = QTabWidget()
+        self.tabs.setMinimumHeight(560)
+        content_layout.addWidget(self.tabs, 1)
+
+        self.personal = JsonRegisterWidget("Personalstamm", PERSONALSTAMM_DATEI, PERSONAL_FELDER, self)
+        self.bewegungen = JsonRegisterWidget("Monatsbewegungen", LOHNBEWEGUNGEN_DATEI, BEWEGUNGS_FELDER, self)
+        self.aenderungen = JsonRegisterWidget("Stammdatenänderungen", STAMMDATENAENDERUNGEN_DATEI, AENDERUNGS_FELDER, self)
+        self.tabs.addTab(self.personal, "Personalstamm")
+        self.tabs.addTab(self.bewegungen, "Monatsbewegungen")
+        self.tabs.addTab(self.aenderungen, "Änderungen")
+
+        self.pruef_table = QTableWidget()
+        self.pruef_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.pruef_table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.tabs.addTab(self.pruef_table, "Prüfprotokoll")
+
+        # Tabellen behalten zusätzlich ihre eigenen Scrollleisten für viele
+        # Mitarbeiter und breite Datensätze.
+        for register in (self.personal, self.bewegungen, self.aenderungen):
+            register.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            register.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        self.scroll_area.setWidget(content)
+        root.addWidget(self.scroll_area)
+
+    def _pruefungen(self, monat: str) -> list[tuple[str, str, str]]:
+        personal = _json_liste_laden(PERSONALSTAMM_DATEI); beweg = _json_liste_laden(LOHNBEWEGUNGEN_DATEI)
+        lohn = [x for x in lade_lohnabrechnungen() if str(x.get('abrechnungsmonat','')) == monat]
+        result = []
+        aktive = [p for p in personal if str(p.get('status','')).lower() not in {'inaktiv','ausgetreten'}]
+        for p in aktive:
+            pn = str(p.get('personalnummer','')).strip(); name = str(p.get('name','')).strip()
+            fehlend = [label for key, label in PERSONAL_FELDER if key in {'personalnummer','name','steuer_id','sv_nummer','krankenkasse','eintritt','beschaeftigungsart'} and not str(p.get(key,'')).strip()]
+            result.append((name or pn, "Personalstamm", "OK" if not fehlend else "Fehlt: " + ", ".join(fehlend)))
+            hat_bewegung = any(str(x.get('abrechnungsmonat','')) == monat and (str(x.get('personalnummer','')) == pn or str(x.get('mitarbeiter','')) == name) for x in beweg)
+            result.append((name or pn, "Monatsbewegung", "Vorhanden" if hat_bewegung else "Nicht erfasst"))
+            hat_lohn = any(str(x.get('personalnummer','')) == pn or str(x.get('mitarbeiter','')) == name for x in lohn)
+            result.append((name or pn, "Lohnabrechnung", "Vorhanden" if hat_lohn else "Noch nicht vorhanden"))
+        if not aktive: result.append(("Gesamt", "Personalstamm", "Keine aktiven Mitarbeiter erfasst"))
+        return result
+
+    def pruefen(self):
+        monat = self.monat.text().strip(); rows = self._pruefungen(monat)
+        self.pruef_table.setColumnCount(3); self.pruef_table.setHorizontalHeaderLabels(["Mitarbeiter", "Prüfung", "Ergebnis"]); self.pruef_table.setRowCount(len(rows))
+        for r, values in enumerate(rows):
+            for c, value in enumerate(values): self.pruef_table.setItem(r,c,QTableWidgetItem(value))
+        self.pruef_table.resizeColumnsToContents(); self.tabs.setCurrentWidget(self.pruef_table)
+
+    def export_paket(self):
+        monat = self.monat.text().strip()
+        if not re.fullmatch(r"\d{4}-\d{2}", monat): QMessageBox.warning(self, "Monat", "Bitte Monat als YYYY-MM eingeben."); return
+        ziel, _ = QFileDialog.getSaveFileName(self, "Lohnbüro-Paket", str(EXPORT_DIR / f"Lohnbuero_Paket_{monat}.zip"), "ZIP (*.zip)")
+        if not ziel: return
+        if not ziel.lower().endswith('.zip'): ziel += '.zip'
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td); personal = _json_liste_laden(PERSONALSTAMM_DATEI)
+            beweg = [x for x in _json_liste_laden(LOHNBEWEGUNGEN_DATEI) if str(x.get('abrechnungsmonat','')) == monat]
+            aend = [x for x in _json_liste_laden(STAMMDATENAENDERUNGEN_DATEI) if monat[:4] in str(x.get('gueltig_ab',''))]
+            lohn = [x for x in lade_lohnabrechnungen() if str(x.get('abrechnungsmonat','')) == monat]
+            pruef = self._pruefungen(monat)
+            for filename, data in [("personalstamm.json", personal),("monatsbewegungen.json", beweg),("stammdatenaenderungen.json", aend),("lohnabrechnungen.json", lohn)]:
+                (p/filename).write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding='utf-8')
+            wb=Workbook(); ws=wb.active; ws.title="Personalstamm"; ws.append([label for _k,label in PERSONAL_FELDER]); [ws.append([d.get(k,'') for k,_l in PERSONAL_FELDER]) for d in personal]
+            ws2=wb.create_sheet("Monatsbewegungen"); ws2.append([label for _k,label in BEWEGUNGS_FELDER]); [ws2.append([d.get(k,'') for k,_l in BEWEGUNGS_FELDER]) for d in beweg]
+            ws3=wb.create_sheet("Lohnabrechnungen"); headers=sorted({k for d in lohn for k in d.keys()}); ws3.append(headers); [ws3.append([d.get(k,'') for k in headers]) for d in lohn]
+            ws4=wb.create_sheet("Prüfprotokoll"); ws4.append(["Mitarbeiter","Prüfung","Ergebnis"]); [ws4.append(list(r)) for r in pruef]
+            wb.save(p/f"Lohnbuero_Uebergabe_{monat}.xlsx")
+            with open(p/f"Monatsbewegungen_{monat}.csv",'w',newline='',encoding='utf-8-sig') as fh:
+                w=csv.DictWriter(fh, fieldnames=[k for k,_l in BEWEGUNGS_FELDER], delimiter=';'); w.writeheader(); w.writerows(beweg)
+            (p/"HINWEISE.txt").write_text("Übergabepaket für die Lohnbuchhaltung. Steuer- und Sozialversicherungsberechnung sowie Meldungen müssen im zugelassenen Lohnsystem geprüft und durchgeführt werden. Sensible personenbezogene Daten geschützt übertragen.",encoding='utf-8')
+            with zipfile.ZipFile(ziel,'w',zipfile.ZIP_DEFLATED) as zf:
+                for f in p.iterdir(): zf.write(f,f.name)
+        QMessageBox.information(self,"Lohnbüro",f"Übergabepaket erstellt:\n{ziel}\n\nBitte wegen personenbezogener Daten nur verschlüsselt/sicher übertragen.")
+
+
+class SteuerberaterUebergabeWidget(QWidget):
+    """Erweiterte, prüfbare Übergabe für Steuerberater und Jahresabschluss."""
+    def __init__(self,parent=None):
+        super().__init__(parent); root=QVBoxLayout(self)
+        title=QLabel("Steuerberater-Übergabecenter"); title.setObjectName("pageTitle"); root.addWidget(title)
+        info=QLabel("Erstellt ein getrenntes Jahrespaket mit Buchungsjournal, Objekt-/Bereichsauswertung, Lohnsummen, Anlagen, Darlehen, Umsatzsteuer und Prüfhinweisen.")
+        info.setWordWrap(True); info.setObjectName("subTitle"); root.addWidget(info)
+        bar=QHBoxLayout(); self.jahr=QComboBox(); self.jahr.addItems([str(y) for y in range(datetime.now().year-8,datetime.now().year+2)]); self.jahr.setCurrentText(str(datetime.now().year))
+        laden=QPushButton("Prüfen"); laden.clicked.connect(self.pruefen); paket=QPushButton("Steuerberater-Paket erstellen"); paket.setObjectName("primaryButton"); paket.clicked.connect(self.export)
+        bar.addWidget(QLabel("Jahr:")); bar.addWidget(self.jahr); bar.addWidget(laden); bar.addWidget(paket); bar.addStretch(); root.addLayout(bar)
+        self.table=QTableWidget(); root.addWidget(self.table,1); self.pruefen()
+    def _daten(self):
+        jahr=self.jahr.currentText(); buch=buchhaltung_daten(jahr,''); lohn=[x for x in lade_lohnabrechnungen() if jahr in str(x.get('abrechnungsmonat',''))]
+        ein=buchhaltung_summe(buch,'Einnahme'); aus=buchhaltung_summe(buch,'Ausgabe'); ag=sum(lohn_berechnen(x)['arbeitgeberkosten'] for x in lohn)
+        anlagen=_json_liste_laden(FINANZCENTER_DIR/'anlagen.json'); darlehen=_json_liste_laden(FINANZCENTER_DIR/'darlehen.json')
+        return jahr,buch,lohn,anlagen,darlehen,ein,aus,ag
+    def pruefen(self):
+        jahr,buch,lohn,anlagen,darlehen,ein,aus,ag=self._daten()
+        rows=[("Buchungen",len(buch),"OK" if buch else "Keine Buchungen"),("Einnahmen",euro(ein),""),("Ausgaben",euro(aus),""),("Lohnabrechnungen",len(lohn),""),("Arbeitgeberkosten",euro(ag),""),("Anlagen",len(anlagen),"AfA fachlich prüfen"),("Darlehen",len(darlehen),"Zinsbescheinigungen beifügen"),("Vorläufiges Ergebnis",euro(ein-aus-ag),"Keine Steuererklärung")]
+        self.table.setColumnCount(3); self.table.setHorizontalHeaderLabels(["Bereich","Wert","Hinweis"]); self.table.setRowCount(len(rows))
+        for r,row in enumerate(rows):
+            for c,v in enumerate(row): self.table.setItem(r,c,QTableWidgetItem(str(v)))
+        self.table.resizeColumnsToContents()
+    def export(self):
+        jahr,buch,lohn,anlagen,darlehen,ein,aus,ag=self._daten()
+        ziel,_=QFileDialog.getSaveFileName(self,"Steuerberater-Paket",str(EXPORT_DIR/f"Steuerberater_Uebergabe_{jahr}.zip"),"ZIP (*.zip)")
+        if not ziel:return
+        if not ziel.lower().endswith('.zip'): ziel += '.zip'
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            p=Path(td); wb=Workbook(); ws=wb.active; ws.title="Buchungsjournal"
+            bh=["Quelle","Datum","Jahr","Monat","Typ","Name","Kostenart","Status","Betrag","Zweck"]; ws.append(bh)
+            for x in buch: ws.append([x.get(k.lower(),'') for k in bh])
+            ws2=wb.create_sheet("Lohnsummen"); ws2.append(["Monat","Mitarbeiter","Personalnummer","Brutto","Netto","AG-Anteile","Arbeitgeberkosten","Kostenstelle"])
+            for d in lohn:
+                c=lohn_berechnen(d); ws2.append([d.get('abrechnungsmonat',''),d.get('mitarbeiter',''),d.get('personalnummer',''),c['brutto'],c['netto'],c['ag_anteile'],c['arbeitgeberkosten'],d.get('kostenstelle','')])
+            ws3=wb.create_sheet("Jahresübersicht"); ws3.append(["Position","Betrag"]); [ws3.append(r) for r in [("Einnahmen",ein),("Ausgaben",aus),("Arbeitgeberkosten",ag),("Vorläufiges Ergebnis",ein-aus-ag)]]
+            for title,data in [("Anlagen",anlagen),("Darlehen",darlehen)]:
+                s=wb.create_sheet(title); keys=sorted({k for d in data for k in d.keys()}); s.append(keys); [s.append([d.get(k,'') for k in keys]) for d in data]
+            wb.save(p/f"Steuerberater_Uebergabe_{jahr}.xlsx")
+            with open(p/f"Buchungsjournal_{jahr}.csv",'w',newline='',encoding='utf-8-sig') as fh:
+                keys=['quelle','datum','jahr','monat','typ','name','kostenart','status','betrag','zweck']; w=csv.DictWriter(fh,fieldnames=keys,delimiter=';'); w.writeheader(); w.writerows([{k:x.get(k,'') for k in keys} for x in buch])
+            (p/'PRUEF_HINWEISE.txt').write_text("Vorläufige Arbeitsunterlagen für den Steuerberater. Kontenzuordnung, Steuerschlüssel, Umsatzsteuerpflicht, AfA, Privatanteile und Abgrenzungen müssen fachlich geprüft werden. Dieses Paket ersetzt weder Buchführung noch Steuererklärung durch befugte Personen.",encoding='utf-8')
+            with zipfile.ZipFile(ziel,'w',zipfile.ZIP_DEFLATED) as zf:
+                for f in p.iterdir(): zf.write(f,f.name)
+        QMessageBox.information(self,"Steuerberater",f"Übergabepaket erstellt:\n{ziel}")
+
 class BuchhaltungSeite(QWidget):
     """Eigenes Unterprogramm für Buchhaltung, gelistet und berechnet aus bestehenden Tabellen."""
 
@@ -3745,7 +4542,7 @@ class BuchhaltungSeite(QWidget):
         title.setObjectName("pageTitle")
         root.addWidget(title)
 
-        info = QLabel("Eigenes Buchhaltungs-Unterprogramm: Einnahmen, Ausgaben, Saldo und offene Posten aus Zahlungen/Rechnungen.")
+        info = QLabel("Finanzcenter Professional: Buchhaltung, Lohn, DATEV, Anlagen/AfA, Darlehen, Umsatzsteuer, Bank, Beleganalyse und Steuerjahresabschluss.")
         info.setObjectName("subTitle")
         root.addWidget(info)
 
@@ -3762,6 +4559,8 @@ class BuchhaltungSeite(QWidget):
 
         export = QPushButton("Excel Export")
         export.clicked.connect(self.export_excel)
+        datev = QPushButton("DATEV Export")
+        datev.clicked.connect(lambda: exportiere_datev_buchungen(self.buchungen, self))
 
         filter_row.addWidget(QLabel("Jahr:"))
         filter_row.addWidget(self.jahr)
@@ -3769,6 +4568,7 @@ class BuchhaltungSeite(QWidget):
         filter_row.addWidget(self.monat)
         filter_row.addWidget(refresh)
         filter_row.addWidget(export)
+        filter_row.addWidget(datev)
         filter_row.addStretch()
         root.addLayout(filter_row)
 
@@ -3790,6 +4590,28 @@ class BuchhaltungSeite(QWidget):
         self.tabs.addTab(self.table_kostenarten, "Kostenarten")
         self.tabs.addTab(self.table_offen, "Offene Posten")
         self.tabs.addTab(self.chart, "Diagramm")
+        self.lohn_widget = LohnabrechnungWidget(self)
+        self.tabs.addTab(self.lohn_widget, "Lohnabrechnungen")
+        self.lohnbuero_widget = LohnbueroCenterWidget(self)
+        self.tabs.addTab(self.lohnbuero_widget, "Lohnbüro-Center")
+        self.steuerberater_uebergabe_widget = SteuerberaterUebergabeWidget(self)
+        self.tabs.addTab(self.steuerberater_uebergabe_widget, "Steuerberater-Übergabe")
+        self.jahresabschluss_widget = JahresabschlussWidget(self)
+        self.tabs.addTab(self.jahresabschluss_widget, "Jahresabschluss / Steuerberater")
+        self.konten_widget = FinanzRegisterWidget("Kontenplan", "kontenplan.json", ["Kontonummer", "Kontoname", "Kontotyp", "Bereich", "DATEV-Konto", "Steuerschlüssel", "Aktiv", "Notiz"], self)
+        self.tabs.addTab(self.konten_widget, "Kontenplan")
+        self.anlagen_widget = AnlagenverzeichnisWidget(self)
+        self.tabs.addTab(self.anlagen_widget, "Anlagen / AfA")
+        self.darlehen_widget = FinanzRegisterWidget("Darlehensverwaltung", "darlehen.json", ["Jahr", "Bank", "Darlehensnummer", "Objekt", "Ursprungsbetrag", "Zinssatz", "Tilgung Jahr", "Zinsen Jahr", "Restschuld", "Sondertilgung", "Zinsbescheinigung PDF", "Notiz"], self)
+        self.tabs.addTab(self.darlehen_widget, "Darlehen")
+        self.ust_widget = UmsatzsteuerWidget(self)
+        self.tabs.addTab(self.ust_widget, "Umsatzsteuer")
+        self.bank_widget = FinanzRegisterWidget("Bankkonten / Salden", "bankkonten.json", ["Kontoname", "IBAN", "Bank", "Bereich", "Objekt", "Anfangssaldo", "Aktueller Saldo", "Stand", "Notiz"], self)
+        self.tabs.addTab(self.bank_widget, "Bank / Konten")
+        self.beleg_widget = BelegAssistentWidget(self)
+        self.tabs.addTab(self.beleg_widget, "Beleg-Assistent")
+        self.steuer_widget = SteuercenterWidget(self)
+        self.tabs.addTab(self.steuer_widget, "Steuercenter")
 
         self._jahre_fuellen()
         self.laden()
@@ -3955,7 +4777,6 @@ class BuchhaltungSeite(QWidget):
             QMessageBox.information(self, "Export", "Keine Buchungen zum Exportieren.")
             return
 
-        from datetime import datetime
 
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         ziel_default = EXPORT_DIR / f"buchhaltung_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
@@ -4052,448 +4873,1007 @@ def mieter_objekt_wohnung(row: list[str]) -> tuple[str, str]:
     return objekt, wohnung
 
 
-def bk_kosten_aus_betriebskosten(jahr: str) -> list[dict[str, Any]]:
-    kosten: list[dict[str, Any]] = []
 
-    for row in DATA.get("Betriebskosten", []):
-        objekt = zeilenwert("Betriebskosten", row, "Objektordner") or zeilenwert("Betriebskosten", row, "Objekt")
-        wohnung = zeilenwert("Betriebskosten", row, "Wohnungsordner") or zeilenwert("Betriebskosten", row, "Wohnung")
-        art = zeilenwert("Betriebskosten", row, "BK Art")
-        versorger = zeilenwert("Betriebskosten", row, "Versorger")
-        abrechnungsjahr = zeilenwert("Betriebskosten", row, "Abrechnungsjahr") or jahr
 
-        if jahr and abrechnungsjahr and str(abrechnungsjahr) != str(jahr):
+
+
+
+BK_JAHRESKOSTEN_FILE = APP_DIR / "bk_jahreskosten.json"
+BK_UMLAGESCHLUESSEL = [
+    "Wohnfläche (m²)",
+    "Wohnungen (gleichmäßig)",
+    "Mieter / Personen (gleichmäßig)",
+    "BK-Vorauszahlung",
+]
+BK_STATUSWERTE = ["Offen", "Erfasst", "Geprüft"]
+BK_JAHRESSTATUS = ["Entwurf", "In Bearbeitung", "Fertig"]
+STANDARD_BK_KOSTENARTEN = [
+    "Grundsteuer", "Wasser", "Abwasser", "Müllabfuhr", "Allgemeinstrom",
+    "Schornsteinfeger", "Gebäudeversicherung", "Haftpflichtversicherung",
+    "Hausmeister", "Hausreinigung", "Gartenpflege", "Winterdienst",
+    "Straßenreinigung", "Heizungswartung", "Rauchwarnmelder", "Aufzug",
+    "Legionellenprüfung", "Dachrinnenreinigung", "Sonstige Betriebskosten",
+]
+
+
+def bk_leere_position(art: str = "") -> dict[str, Any]:
+    return {
+        "art": str(art or "").strip(),
+        "betrag": 0.0,
+        "umlage": "Wohnfläche (m²)",
+        "lieferant": "",
+        "rechnungsnummer": "",
+        "rechnungsdatum": "",
+        "pdf": "",
+        "status": "Offen",
+        "bemerkung": "",
+    }
+
+
+def bk_datenbank_laden() -> dict[str, Any]:
+    try:
+        if not BK_JAHRESKOSTEN_FILE.exists():
+            return {}
+        data = json.loads(BK_JAHRESKOSTEN_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+
+
+def bk_datenbank_speichern(daten: dict[str, Any]) -> None:
+    BK_JAHRESKOSTEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = BK_JAHRESKOSTEN_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(daten, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(BK_JAHRESKOSTEN_FILE)
+
+
+def bk_jahresdatensatz_laden(objekt: str, jahr: str) -> dict[str, Any]:
+    daten = bk_datenbank_laden()
+    raw = daten.get(norm_key(objekt), {}).get(str(jahr), {})
+    # Rückwärtskompatibilität zu Version 7.9: Dort war der Jahreswert direkt eine Liste.
+    if isinstance(raw, list):
+        kosten = raw
+        meta = {}
+    elif isinstance(raw, dict):
+        kosten = raw.get("kosten", [])
+        meta = raw
+    else:
+        kosten, meta = [], {}
+
+    result_kosten: list[dict[str, Any]] = []
+    for item in kosten if isinstance(kosten, list) else []:
+        if not isinstance(item, dict):
             continue
+        pos = bk_leere_position(item.get("art", ""))
+        pos.update({
+            "betrag": float(item.get("betrag", 0) or 0),
+            "umlage": str(item.get("umlage", "Wohnfläche (m²)") or "Wohnfläche (m²)"),
+            "lieferant": str(item.get("lieferant", "") or ""),
+            "rechnungsnummer": str(item.get("rechnungsnummer", "") or ""),
+            "rechnungsdatum": str(item.get("rechnungsdatum", "") or ""),
+            "pdf": str(item.get("pdf", "") or ""),
+            "status": str(item.get("status", "Erfasst" if float(item.get("betrag", 0) or 0) > 0 else "Offen") or "Offen"),
+            "bemerkung": str(item.get("bemerkung", "") or ""),
+        })
+        result_kosten.append(pos)
 
-        monatlich = betrag_de(zeilenwert("Betriebskosten", row, "Abschlag monatlich"))
-        jahreswert = betrag_de(zeilenwert("Betriebskosten", row, "Ist-BK jährlich"))
-        if not jahreswert:
-            jahreswert = monatlich * 12
+    return {
+        "objekt": objekt,
+        "jahr": str(jahr),
+        "status": str(meta.get("status", "Entwurf") or "Entwurf"),
+        "notiz": str(meta.get("notiz", "") or ""),
+        "geaendert": str(meta.get("geaendert", "") or ""),
+        "fertiggestellt": str(meta.get("fertiggestellt", "") or ""),
+        "kosten": result_kosten,
+    }
 
-        if jahreswert:
-            kosten.append({
-                "quelle": "Betriebskosten",
-                "objekt": objekt,
-                "wohnung": wohnung,
-                "art": art or "Betriebskosten",
-                "versorger": versorger,
-                "betrag": jahreswert,
+
+def bk_jahreskosten_laden(objekt: str, jahr: str) -> list[dict[str, Any]]:
+    return bk_jahresdatensatz_laden(objekt, jahr)["kosten"]
+
+
+def bk_jahresdatensatz_speichern(
+    objekt: str,
+    jahr: str,
+    kosten: list[dict[str, Any]],
+    status: str = "Entwurf",
+    notiz: str = "",
+) -> None:
+    daten = bk_datenbank_laden()
+    key = norm_key(objekt)
+    daten.setdefault(key, {})
+    vorher = daten[key].get(str(jahr), {})
+    fertiggestellt = ""
+    if isinstance(vorher, dict):
+        fertiggestellt = str(vorher.get("fertiggestellt", "") or "")
+    if status == "Fertig" and not fertiggestellt:
+        fertiggestellt = datetime.now().isoformat(timespec="seconds")
+    if status != "Fertig":
+        fertiggestellt = ""
+
+    clean: list[dict[str, Any]] = []
+    for item in kosten:
+        art = str(item.get("art", "") or "").strip()
+        if not art:
+            continue
+        clean.append({
+            "art": art,
+            "betrag": round(float(item.get("betrag", 0) or 0), 2),
+            "umlage": str(item.get("umlage", "Wohnfläche (m²)") or "Wohnfläche (m²)"),
+            "lieferant": str(item.get("lieferant", "") or "").strip(),
+            "rechnungsnummer": str(item.get("rechnungsnummer", "") or "").strip(),
+            "rechnungsdatum": str(item.get("rechnungsdatum", "") or "").strip(),
+            "pdf": str(item.get("pdf", "") or "").strip(),
+            "status": str(item.get("status", "Offen") or "Offen"),
+            "bemerkung": str(item.get("bemerkung", "") or "").strip(),
+        })
+    daten[key][str(jahr)] = {
+        "objekt": objekt,
+        "jahr": str(jahr),
+        "status": status if status in BK_JAHRESSTATUS else "Entwurf",
+        "notiz": str(notiz or ""),
+        "geaendert": datetime.now().isoformat(timespec="seconds"),
+        "fertiggestellt": fertiggestellt,
+        "kosten": clean,
+    }
+    bk_datenbank_speichern(daten)
+
+
+def bk_jahreskosten_speichern(objekt: str, jahr: str, kosten: list[dict[str, Any]]) -> None:
+    bestand = bk_jahresdatensatz_laden(objekt, jahr)
+    bk_jahresdatensatz_speichern(
+        objekt, jahr, kosten,
+        str(bestand.get("status", "Entwurf")),
+        str(bestand.get("notiz", "")),
+    )
+
+
+def bk_rechnung_kopieren(path: str, objekt: str, jahr: str, kostenart: str) -> str:
+    quelle = Path(path)
+    if not quelle.exists():
+        return ""
+    ziel_dir = DOKUMENTE_DIR / "bk_belege" / safe_filename(jahr) / safe_filename(objekt)
+    ziel_dir.mkdir(parents=True, exist_ok=True)
+    basisname = safe_filename(kostenart) + quelle.suffix.lower()
+    ziel = ziel_dir / basisname
+    nummer = 2
+    while ziel.exists() and ziel.resolve() != quelle.resolve():
+        ziel = ziel_dir / f"{safe_filename(kostenart)}_{nummer}{quelle.suffix.lower()}"
+        nummer += 1
+    if ziel.resolve() != quelle.resolve():
+        shutil.copy2(quelle, ziel)
+    try:
+        return str(ziel.relative_to(BASE_DIR)).replace("\\", "/")
+    except ValueError:
+        return str(ziel)
+
+
+def bk_objekte() -> list[str]:
+    """Liefert alle bekannten Objektbezüge ohne Änderung der Excel-Struktur."""
+    werte: dict[str, str] = {}
+    for titel in ["Objekte", "Wohnungen", "Mieter"]:
+        for row in DATA.get(titel, []):
+            kandidaten = [
+                feldwert(titel, row, ["Objektname", "Objekt", "Objekt / Adresse"]),
+                feldwert(titel, row, ["Objektordner"]),
+            ]
+            if titel == "Mieter":
+                objekt, _wohnung = mieter_objekt_wohnung(row)
+                kandidaten.append(objekt)
+            for wert in kandidaten:
+                text = str(wert or "").strip()
+                if text:
+                    werte.setdefault(norm_key(text), text)
+    return sorted(werte.values(), key=lambda value: value.lower())
+
+
+def bk_mieter_fuer_objekt(objekt: str) -> list[tuple[int, list[str]]]:
+    key = norm_key(objekt)
+    return [
+        (index, row)
+        for index, row in enumerate(DATA.get("Mieter", []))
+        if key and norm_key(mieter_objekt_wohnung(row)[0]) == key
+    ]
+
+
+def bk_wohnungen_fuer_objekt(objekt: str) -> list[list[str]]:
+    key = norm_key(objekt)
+    return [
+        row for row in DATA.get("Wohnungen", [])
+        if key and norm_key(feldwert("Wohnungen", row, ["Objekt", "Objektordner"])) == key
+    ]
+
+
+def bk_wohnflaeche(row: list[str], wohnung: str, objekt: str) -> float:
+    wert = betrag_de(zeilenwert("Mieter", row, "Wohnfläche"))
+    if wert > 0:
+        return wert
+    for wrow in bk_wohnungen_fuer_objekt(objekt):
+        wname = feldwert("Wohnungen", wrow, ["Wohnung", "Wohnungsordner"])
+        if wohnung and norm_key(wname) == norm_key(wohnung):
+            return betrag_de(feldwert("Wohnungen", wrow, ["Größe qm", "Wohnfläche", "Fläche"]))
+    return 0.0
+
+
+def bk_datum(value: Any) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%d.%m.%y"):
+        try:
+            return datetime.strptime(text[:10], fmt).date()
+        except ValueError:
+            pass
+    match = re.search(r"(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})", text)
+    if match:
+        try:
+            return date(int(match.group(3)), int(match.group(2)), int(match.group(1)))
+        except ValueError:
+            return None
+    return None
+
+
+def bk_nutzungsdaten(row: list[str], jahr: str) -> tuple[date, date, int, int, float]:
+    try:
+        year = int(jahr)
+    except ValueError:
+        year = datetime.now().year
+    year_start, year_end = date(year, 1, 1), date(year, 12, 31)
+    start = bk_datum(zeilenwert("Mieter", row, "Mietbeginn")) or year_start
+    end = bk_datum(zeilenwert("Mieter", row, "Mietende")) or year_end
+    start = max(start, year_start)
+    end = min(end, year_end)
+    total_days = (year_end - year_start).days + 1
+    occupied_days = max(0, (end - start).days + 1)
+    factor = occupied_days / total_days if total_days else 0.0
+    return start, end, occupied_days, total_days, factor
+
+
+def bk_mietzeitraum(row: list[str], jahr: str) -> str:
+    start, end, occupied, _total, _factor = bk_nutzungsdaten(row, jahr)
+    if occupied <= 0:
+        return "Kein Nutzungszeitraum im Abrechnungsjahr"
+    return f"{start.strftime('%d.%m.%Y')} – {end.strftime('%d.%m.%Y')}"
+
+
+def bk_vorauszahlung(row: list[str], jahr: str) -> float:
+    _start, _end, _days, _total, factor = bk_nutzungsdaten(row, jahr)
+    annual = betrag_de(zeilenwert("Mieter", row, "BK jährlich"))
+    if annual > 0:
+        return annual * factor
+    monthly = betrag_de(zeilenwert("Mieter", row, "BK monatlich"))
+    return monthly * 12.0 * factor
+
+
+def bk_gewicht(schluessel: str, row: list[str], wohnung: str, objekt: str, jahr: str = "") -> float:
+    _start, _end, _days, _total, time_factor = bk_nutzungsdaten(row, jahr or str(datetime.now().year))
+    if time_factor <= 0:
+        return 0.0
+    if schluessel == "Wohnfläche (m²)":
+        return bk_wohnflaeche(row, wohnung, objekt) * time_factor
+    if schluessel == "BK-Vorauszahlung":
+        return bk_vorauszahlung(row, jahr or str(datetime.now().year))
+    return time_factor
+
+
+def bk_abrechnung_berechnen(
+    jahr: str,
+    objekt: str = "",
+    haus_kosten: float | None = None,
+    schluessel: str = "Wohnfläche (m²)",
+    kostenpositionen: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Erstellt detaillierte Abrechnungen unter Berücksichtigung des Mietzeitraums."""
+    if not objekt:
+        result: list[dict[str, Any]] = []
+        for obj in bk_objekte():
+            result.extend(bk_abrechnung_berechnen(jahr, obj, haus_kosten, schluessel, kostenpositionen))
+        return result
+
+    mieter_rows = bk_mieter_fuer_objekt(objekt)
+    if not mieter_rows:
+        return []
+
+    positionen = list(kostenpositionen or bk_jahreskosten_laden(objekt, jahr))
+    if not positionen and float(haus_kosten or 0) > 0:
+        positionen = [{"art": "Betriebskosten Haus gesamt", "betrag": float(haus_kosten or 0), "umlage": schluessel}]
+    positionen = [
+        p for p in positionen
+        if str(p.get("art", "")).strip() and float(p.get("betrag", 0) or 0) > 0
+    ]
+    if not positionen:
+        return []
+
+    basis: list[dict[str, Any]] = []
+    for mieter_index, row in mieter_rows:
+        _objekt, wohnung = mieter_objekt_wohnung(row)
+        start, end, days, total_days, factor = bk_nutzungsdaten(row, jahr)
+        if days <= 0:
+            continue
+        basis.append({
+            "mieter_index": mieter_index,
+            "row": row,
+            "wohnung": wohnung,
+            "vorauszahlung": bk_vorauszahlung(row, jahr),
+            "nutzungstage": days,
+            "jahrestage": total_days,
+            "zeitfaktor": factor,
+            "nutzungsbeginn": start,
+            "nutzungsende": end,
+            "details": [],
+            "ist": 0.0,
+        })
+    if not basis:
+        return []
+
+    for position in positionen:
+        art = str(position.get("art", "")).strip()
+        betrag = float(position.get("betrag", 0) or 0)
+        umlage = str(position.get("umlage", schluessel) or schluessel)
+        gewichte = [
+            max(0.0, bk_gewicht(umlage, b["row"], b["wohnung"], objekt, jahr))
+            for b in basis
+        ]
+        gesamtgewicht = sum(gewichte)
+        effektive_umlage = umlage
+        if gesamtgewicht <= 0:
+            gewichte = [float(b["zeitfaktor"]) for b in basis]
+            gesamtgewicht = sum(gewichte)
+            effektive_umlage = "Mieter / Personen (gleichmäßig)"
+        for index, b in enumerate(basis):
+            anteil = betrag * gewichte[index] / gesamtgewicht if gesamtgewicht else 0.0
+            prozent = gewichte[index] / gesamtgewicht * 100.0 if gesamtgewicht else 0.0
+            b["ist"] += anteil
+            b["details"].append({
+                "art": art,
+                "lieferant": str(position.get("lieferant", "") or ""),
+                "rechnungsnummer": str(position.get("rechnungsnummer", "") or ""),
+                "rechnungsdatum": str(position.get("rechnungsdatum", "") or ""),
+                "pdf": str(position.get("pdf", "") or ""),
+                "umlage": effektive_umlage,
+                "betrag": betrag,
+                "gewicht": gewichte[index],
+                "gesamtgewicht": gesamtgewicht,
+                "anteil_prozent": prozent,
+                "anteil": anteil,
             })
 
-    return kosten
-
-
-def bk_kosten_aus_zahlungen(jahr: str) -> list[dict[str, Any]]:
-    kosten: list[dict[str, Any]] = []
-
-    for row in DATA.get("Zahlungen", []):
-        datum = zeilenwert("Zahlungen", row, "Datum")
-        kostenart = zeilenwert("Zahlungen", row, "Kostenart")
-        zweck = zeilenwert("Zahlungen", row, "Verwendungszweck")
-        rechnungsjahr = zeilenwert("Zahlungen", row, "Rechnungsjahr") or jahr_aus_datum_oder_text(datum)
-        betrag = betrag_de(zeilenwert("Zahlungen", row, "Betrag"))
-
-        if jahr and rechnungsjahr and str(rechnungsjahr) != str(jahr):
-            continue
-
-        text = f"{kostenart} {zweck}".lower()
-        if not any(w in text for w in ["betriebskosten", "nebenkosten", "abwasser", "wasser", "müll", "muell", "heizung", "schornstein", "grundsteuer", "versicherung", "hausmeister"]):
-            continue
-
-        objekt = ""
-        wohnung = ""
-        for m in DATA.get("Mieter", []):
-            mo, mw = mieter_objekt_wohnung(m)
-            if mo and mo.lower() in text:
-                objekt = mo
-            if mw and mw.lower() in text:
-                wohnung = mw
-
-        kosten.append({
-            "quelle": "Zahlungen",
-            "objekt": objekt,
-            "wohnung": wohnung,
-            "art": kostenart or "Betriebskosten",
-            "versorger": zeilenwert("Zahlungen", row, "Name/Quelle"),
-            "betrag": betrag,
-        })
-
-    return kosten
-
-
-def bk_gesamtflaeche_objekt(objekt: str) -> float:
-    total = 0.0
-    objekt_key = norm_key(objekt)
-
-    for row in DATA.get("Mieter", []):
-        mo, _mw = mieter_objekt_wohnung(row)
-        if objekt_key and norm_key(mo) != objekt_key:
-            continue
-        flaeche = betrag_de(zeilenwert("Mieter", row, "Wohnfläche"))
-        total += flaeche
-
-    return total
-
-
-def bk_abrechnung_berechnen(jahr: str) -> list[dict[str, Any]]:
-    alle_kosten = bk_kosten_aus_betriebskosten(jahr) + bk_kosten_aus_zahlungen(jahr)
+    haus_kosten_gesamt = sum(float(p.get("betrag", 0) or 0) for p in positionen)
     abrechnungen: list[dict[str, Any]] = []
-
-    for mieter_row in DATA.get("Mieter", []):
-        name = zeilenwert("Mieter", mieter_row, "Mieter")
-        objekt, wohnung = mieter_objekt_wohnung(mieter_row)
-        flaeche = betrag_de(zeilenwert("Mieter", mieter_row, "Wohnfläche"))
-
-        vorauszahlung = betrag_de(zeilenwert("Mieter", mieter_row, "BK jährlich"))
-        if not vorauszahlung:
-            vorauszahlung = betrag_de(zeilenwert("Mieter", mieter_row, "BK monatlich")) * 12
-
-        ist_vorgabe = betrag_de(zeilenwert("Mieter", mieter_row, "Ist-BK jährlich"))
-
-        direkte_kosten = 0.0
-        anteilige_kosten = 0.0
-        details: list[dict[str, Any]] = []
-
-        for kosten in alle_kosten:
-            ko = str(kosten.get("objekt", ""))
-            kw = str(kosten.get("wohnung", ""))
-            betrag = float(kosten.get("betrag", 0.0))
-
-            if kw and wohnung and norm_key(kw) == norm_key(wohnung):
-                direkte_kosten += betrag
-                details.append({**kosten, "umlage": "Direkt", "anteil": betrag})
-            elif ko and objekt and norm_key(ko) == norm_key(objekt):
-                gesamtflaeche = bk_gesamtflaeche_objekt(objekt)
-                anteil = betrag * (flaeche / gesamtflaeche) if gesamtflaeche and flaeche else 0.0
-                anteilige_kosten += anteil
-                details.append({**kosten, "umlage": "Wohnfläche", "anteil": anteil})
-
-        ist = ist_vorgabe if ist_vorgabe else direkte_kosten + anteilige_kosten
+    for b in basis:
+        row = b["row"]
+        ist = float(b["ist"])
+        vorauszahlung = float(b["vorauszahlung"])
         differenz = ist - vorauszahlung
-
         abrechnungen.append({
             "jahr": jahr,
-            "mieter": name,
+            "mieter_index": b["mieter_index"],
+            "mieter": zeilenwert("Mieter", row, "Mieter"),
+            "empfaenger_anschrift": zeilenwert("Mieter", row, "Ort"),
             "objekt": objekt,
-            "wohnung": wohnung,
-            "wohnflaeche": flaeche,
+            "wohnung": b["wohnung"],
+            "wohnungsadresse": b["wohnung"] or zeilenwert("Mieter", row, "Ort") or objekt,
+            "wohnflaeche": bk_wohnflaeche(row, b["wohnung"], objekt),
+            "mietzeitraum": bk_mietzeitraum(row, jahr),
+            "abrechnungszeitraum": f"01.01.{jahr} – 31.12.{jahr}" if jahr else "",
+            "nutzungstage": b["nutzungstage"],
+            "jahrestage": b["jahrestage"],
+            "hauskosten": haus_kosten_gesamt,
+            "umlage_schluessel": "je Kostenart",
+            "anteil_prozent": (ist / haus_kosten_gesamt * 100.0) if haus_kosten_gesamt else 0.0,
             "vorauszahlung": vorauszahlung,
             "ist": ist,
             "nachzahlung": differenz if differenz > 0 else 0.0,
             "guthaben": abs(differenz) if differenz < 0 else 0.0,
-            "status": "Nachzahlung" if differenz > 0 else ("Guthaben" if differenz < 0 else "Ausgeglichen"),
-            "details": details,
+            "status": "Nachzahlung" if differenz > 0.009 else ("Guthaben" if differenz < -0.009 else "Ausgeglichen"),
+            "details": b["details"],
         })
-
     return abrechnungen
 
 
+def bk_logo_uri() -> str:
+    logo = str(CONFIG.get("firma_logo", "")).strip()
+    if not logo:
+        return ""
+    path = Path(logo)
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    return path.resolve().as_uri() if path.exists() else ""
+
+
 def bk_abrechnung_html(eintrag: dict[str, Any]) -> str:
-    rows = ""
-    for d in eintrag.get("details", []):
-        rows += (
-            "<tr>"
-            f"<td>{d.get('art','')}</td>"
-            f"<td>{d.get('versorger','')}</td>"
-            f"<td>{d.get('umlage','')}</td>"
-            f"<td style='text-align:right'>{waehrung(float(d.get('betrag',0)))}</td>"
-            f"<td style='text-align:right'>{waehrung(float(d.get('anteil',0)))}</td>"
-            "</tr>"
+    esc = lambda value: html.escape(str(value or ""))
+    logo_uri = bk_logo_uri()
+    logo_html = f"<img src='{esc(logo_uri)}' style='max-height:85px;max-width:220px'>" if logo_uri else ""
+    heute = datetime.now().strftime("%d.%m.%Y")
+    bankzeile = " · ".join(filter(None, [
+        str(CONFIG.get("firma_bank", "")).strip(),
+        ("IBAN " + str(CONFIG.get("firma_iban", "")).strip()) if CONFIG.get("firma_iban") else "",
+        ("BIC " + str(CONFIG.get("firma_bic", "")).strip()) if CONFIG.get("firma_bic") else "",
+    ]))
+    nachzahlung = float(eintrag.get("nachzahlung", 0))
+    guthaben = float(eintrag.get("guthaben", 0))
+    ergebnis_label = "Nachzahlung" if nachzahlung > 0 else ("Guthaben" if guthaben > 0 else "Ergebnis")
+    ergebnis_wert = nachzahlung or guthaben
+    gruss = esc(CONFIG.get("firma_gruss", "")).replace("\n", "<br>")
+    hinweis = esc(CONFIG.get("bk_hinweis", ""))
+    detail_rows = "".join(
+        "<tr><td>{}</td><td>{}</td><td>{}: {:.2f} %</td><td class='rechts'>{}</td><td class='rechts'>{}</td></tr>".format(
+            esc(detail.get("art")),
+            esc(detail.get("lieferant")),
+            esc(detail.get("umlage")),
+            float(detail.get("anteil_prozent", 0)),
+            waehrung(float(detail.get("betrag", 0))),
+            waehrung(float(detail.get("anteil", 0))),
         )
-
-    if not rows:
-        rows = "<tr><td colspan='5'>Keine Detailkosten gefunden. Es werden ggf. die Ist-BK aus der Mietertabelle verwendet.</td></tr>"
-
+        for detail in eintrag.get("details", [])
+    )
     return f"""
-    <html>
-    <head>
-    <meta charset='utf-8'>
-    <style>
-        body {{ font-family: Arial; font-size: 11pt; color: #111827; }}
-        h1 {{ color: #061a38; }}
-        h2 {{ color: #2457c5; margin-top: 24px; }}
-        table {{ border-collapse: collapse; width: 100%; margin-top: 8px; }}
-        th, td {{ border: 1px solid #cbd5e1; padding: 6px; }}
-        th {{ background: #061a38; color: white; }}
-        .summe {{ font-weight: bold; background: #f1f5f9; }}
-        .hinweis {{ margin-top: 24px; font-size: 10pt; color: #475569; }}
-    </style>
-    </head>
-    <body>
-    <h1>Betriebskostenabrechnung {eintrag.get('jahr','')}</h1>
-
-    <p><b>Mieter:</b> {eintrag.get('mieter','')}<br>
-    <b>Objekt:</b> {eintrag.get('objekt','')}<br>
-    <b>Wohnung:</b> {eintrag.get('wohnung','')}<br>
-    <b>Wohnfläche:</b> {eintrag.get('wohnflaeche',0):.2f} m²</p>
-
-    <h2>Kostenübersicht</h2>
-    <table>
-        <tr>
-            <th>Kostenart</th>
-            <th>Versorger</th>
-            <th>Umlage</th>
-            <th>Gesamtbetrag</th>
-            <th>Anteil Mieter</th>
-        </tr>
-        {rows}
-    </table>
-
-    <h2>Abrechnung</h2>
-    <table>
-        <tr><td>BK-Vorauszahlung Jahr</td><td style='text-align:right'>{waehrung(float(eintrag.get('vorauszahlung',0)))}</td></tr>
-        <tr><td>Ist-Betriebskosten Jahr</td><td style='text-align:right'>{waehrung(float(eintrag.get('ist',0)))}</td></tr>
-        <tr class='summe'><td>Nachzahlung</td><td style='text-align:right'>{waehrung(float(eintrag.get('nachzahlung',0)))}</td></tr>
-        <tr class='summe'><td>Guthaben</td><td style='text-align:right'>{waehrung(float(eintrag.get('guthaben',0)))}</td></tr>
-        <tr><td>Status</td><td>{eintrag.get('status','')}</td></tr>
-    </table>
-
-    <p class='hinweis'>
-    Dieser Vordruck wurde automatisch aus dem aktuellen Datenbestand der Immobilienverwaltung erzeugt.
-    Bitte vor Versand prüfen und ggf. rechtlich/steuerlich gegenprüfen.
-    </p>
-
-    <br><br>
-    <p>_____________________________<br>Unterschrift / Datum</p>
-    </body>
-    </html>
+    <html><head><meta charset='utf-8'><style>
+      @page {{ size: A4; margin: 15mm 14mm 15mm 18mm; }}
+      body {{ font-family: Arial, Helvetica, sans-serif; font-size: 9.5pt; color:#111; line-height:1.3; }}
+      .kopf {{ width:100%; border:0; margin-bottom:14px; }} .kopf td {{ border:0; vertical-align:top; }}
+      .firma {{ text-align:right; font-size:9pt; }} .firma .name {{ font-size:16pt; font-weight:bold; color:#16365c; }}
+      .slogan {{ font-weight:bold; color:#16365c; }} .absender {{ font-size:7.5pt; text-decoration:underline; margin-bottom:7px; }}
+      .empfaenger {{ min-height:82px; width:52%; white-space:pre-line; }} .datum {{ text-align:right; margin:8px 0 15px; }}
+      h1 {{ font-size:15pt; margin:0 0 14px; }} .stamm,.kosten {{ width:100%; border-collapse:collapse; }}
+      .stamm {{ margin-bottom:15px; }} .stamm td {{ padding:3px 5px; border-bottom:1px solid #ddd; }}
+      .stamm td:first-child {{ width:34%; font-weight:bold; }} .kosten th {{ background:#16365c; color:white; padding:6px; border:1px solid #16365c; }}
+      .kosten td {{ padding:5px; border:1px solid #b8c2cc; }} .rechts {{ text-align:right; }}
+      .ergebnis {{ margin-top:15px; border:2px solid #16365c; padding:10px; font-size:12pt; font-weight:bold; }}
+      .hinweis {{ margin-top:15px; font-size:9pt; }} .fuss {{ margin-top:28px; font-size:8pt; border-top:1px solid #999; padding-top:6px; text-align:center; }}
+    </style></head><body>
+      <table class='kopf'><tr><td>{logo_html}</td><td class='firma'>
+        <div class='name'>{esc(CONFIG.get('firma_name'))}</div><div>{esc(CONFIG.get('firma_untertitel'))}</div>
+        <div>{esc(CONFIG.get('firma_leistung'))}</div><div class='slogan'>{esc(CONFIG.get('firma_slogan'))}</div>
+        <div>{esc(CONFIG.get('firma_inhaber'))}</div><div>{esc(CONFIG.get('firma_strasse'))}, {esc(CONFIG.get('firma_plz_ort'))}</div>
+        <div>Tel.: {esc(CONFIG.get('firma_telefon'))}</div><div>{esc(CONFIG.get('firma_email'))}</div>
+      </td></tr></table>
+      <div class='absender'>{esc(CONFIG.get('firma_name'))} · {esc(CONFIG.get('firma_strasse'))} · {esc(CONFIG.get('firma_plz_ort'))}</div>
+      <div class='empfaenger'>Frau/Herrn<br><b>{esc(eintrag.get('mieter'))}</b><br>{esc(eintrag.get('empfaenger_anschrift'))}</div>
+      <div class='datum'>{esc(CONFIG.get('firma_plz_ort')).split(' ')[-1] if CONFIG.get('firma_plz_ort') else ''}, {heute}</div>
+      <h1>BETRIEBSKOSTENABRECHNUNG</h1>
+      <table class='stamm'>
+        <tr><td>Wohnung</td><td>{esc(eintrag.get('wohnung'))}, {esc(eintrag.get('objekt'))}</td></tr>
+        <tr><td>Mietzeitraum</td><td>{esc(eintrag.get('mietzeitraum'))} ({esc(eintrag.get('nutzungstage'))} Tage)</td></tr>
+        <tr><td>Abrechnungszeitraum</td><td>{esc(eintrag.get('abrechnungszeitraum'))}</td></tr>
+        <tr><td>Umlageschlüssel</td><td>je Kostenart gemäß Aufstellung</td></tr>
+      </table>
+      <p>Sehr geehrte Damen und Herren,</p>
+      <p>für den genannten Zeitraum ergibt sich folgende Betriebskostenabrechnung:</p>
+      <table class='kosten'>
+        <tr><th>Position</th><th>Versorger</th><th>Berechnungsgrundlage</th><th>Gesamt Haus</th><th>Ihr Anteil</th></tr>
+        {detail_rows}
+        <tr><td colspan='3'><b>Summe Betriebskosten</b></td><td class='rechts'><b>{waehrung(float(eintrag.get('hauskosten',0)))}</b></td><td class='rechts'><b>{waehrung(float(eintrag.get('ist',0)))}</b></td></tr>
+        <tr><td colspan='4'><b>Geleistete BK-Vorauszahlungen</b></td><td class='rechts'><b>- {waehrung(float(eintrag.get('vorauszahlung',0)))}</b></td></tr>
+      </table>
+      <div class='ergebnis'>{ergebnis_label}: <span style='float:right'>{waehrung(ergebnis_wert)}</span></div>
+      <p class='hinweis'>{hinweis}</p><p>{gruss}</p>
+      <div class='fuss'>{esc(CONFIG.get('firma_name'))} · {esc(CONFIG.get('firma_strasse'))} · {esc(CONFIG.get('firma_plz_ort'))}{(' · ' + esc(bankzeile)) if bankzeile else ''}{(' · ' + esc(CONFIG.get('firma_steuer'))) if CONFIG.get('firma_steuer') else ''}</div>
+    </body></html>
     """
 
 
+def bk_pdf_speichern(eintrag: dict[str, Any]) -> Path:
+    jahr = safe_filename(eintrag.get("jahr", ""))
+    objekt = safe_filename(eintrag.get("objekt", "Objekt"))
+    mieter = safe_filename(eintrag.get("mieter", "Mieter"))
+    ziel_dir = DOKUMENTE_DIR / "bk_abrechnungen" / jahr / objekt
+    ziel_dir.mkdir(parents=True, exist_ok=True)
+    ziel = ziel_dir / f"BK_Abrechnung_{jahr}_{mieter}.pdf"
+    doc = QTextDocument()
+    doc.setHtml(bk_abrechnung_html(eintrag))
+    printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+    printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+    printer.setOutputFileName(str(ziel))
+    doc.print_(printer)
+    return ziel
+
+
+def bk_mieterfelder_aktualisieren(eintrag: dict[str, Any], pdf_path: Path | None = None) -> None:
+    index = int(eintrag.get("mieter_index", -1))
+    rows = DATA.get("Mieter", [])
+    if index < 0 or index >= len(rows):
+        return
+    row = rows[index]
+    updates = {
+        "Ist-BK jährlich": f"{float(eintrag.get('ist',0)):.2f}",
+        "Nachzahlung": f"{float(eintrag.get('nachzahlung',0)):.2f}",
+        "Guthaben": f"{float(eintrag.get('guthaben',0)):.2f}",
+        "BK-Status": str(eintrag.get("status", "")),
+    }
+    if pdf_path is not None:
+        try:
+            updates["BK (PDF)"] = str(pdf_path.relative_to(BASE_DIR)).replace("\\", "/")
+        except ValueError:
+            updates["BK (PDF)"] = str(pdf_path)
+    for feld, wert in updates.items():
+        idx = feld_index("Mieter", feld)
+        if idx is not None:
+            while len(row) <= idx:
+                row.append("")
+            row[idx] = wert
+
+
 class BKAutomatikSeite(QWidget):
-    """Automatische Betriebskostenabrechnung und Jahresvordrucke."""
+    """BK-Verwaltungscenter Professional: Erfassung, Belege, Prüfung, Abrechnung und Vergleich."""
+
+    COL_ART, COL_BETRAG, COL_UMLAGE, COL_LIEFERANT, COL_NR, COL_DATUM, COL_PDF, COL_STATUS, COL_NOTIZ = range(9)
 
     def __init__(self):
         super().__init__()
         self.abrechnungen: list[dict[str, Any]] = []
+        self._ladevorgang = False
+        self._dirty = False
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.setSingleShot(True)
+        self.autosave_timer.setInterval(800)
+        self.autosave_timer.timeout.connect(self._autosave)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 22, 24, 22)
-        root.setSpacing(14)
-
-        title = QLabel("BK-Automatik")
+        root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(10)
+        title = QLabel("BK-Verwaltungscenter Professional")
         title.setObjectName("pageTitle")
         root.addWidget(title)
-
-        info = QLabel("Berechnet Betriebskosten aus aktuellem Datenstand und erzeugt Jahresvordrucke je Mieter.")
+        info = QLabel("Rechnungen nach und nach erfassen, Belege hinterlegen, prüfen und anschließend alle Mieterabrechnungen erstellen.")
         info.setObjectName("subTitle")
         root.addWidget(info)
 
-        row = QHBoxLayout()
+        kopf = QHBoxLayout()
+        self.objekt = QComboBox()
+        self.objekt.setMinimumWidth(280)
+        self.objekt.addItems(bk_objekte())
         self.jahr = QComboBox()
+        self.jahr.setEditable(True)
         self.jahr.addItems(self._jahre())
-        if not self.jahr.currentText():
-            from datetime import datetime
-            self.jahr.addItem(str(datetime.now().year))
-            self.jahr.setCurrentText(str(datetime.now().year))
+        self.jahr.setCurrentText(str(datetime.now().year - 1))
+        self.jahresstatus = QComboBox()
+        self.jahresstatus.addItems(BK_JAHRESSTATUS)
+        self.jahresstatus.setMinimumWidth(150)
+        kopf.addWidget(QLabel("Objekt:")); kopf.addWidget(self.objekt)
+        kopf.addWidget(QLabel("Abrechnungsjahr:")); kopf.addWidget(self.jahr)
+        kopf.addWidget(QLabel("Jahresstatus:")); kopf.addWidget(self.jahresstatus)
+        kopf.addStretch()
+        root.addLayout(kopf)
 
-        berechnen = QPushButton("Aktuell berechnen")
-        berechnen.setObjectName("primaryButton")
-        berechnen.clicked.connect(self.laden)
+        statuszeile = QHBoxLayout()
+        self.fortschritt = QProgressBar()
+        self.fortschritt.setRange(0, 100)
+        self.fortschritt.setMinimumWidth(320)
+        self.fortschritt_label = QLabel("0 von 0 Positionen vollständig")
+        self.offen_label = QLabel("Offen: 0")
+        self.summe_label = QLabel("Summe: 0,00 €")
+        self.summe_label.setObjectName("metricValue")
+        statuszeile.addWidget(self.fortschritt)
+        statuszeile.addWidget(self.fortschritt_label)
+        statuszeile.addWidget(self.offen_label)
+        statuszeile.addStretch()
+        statuszeile.addWidget(self.summe_label)
+        root.addLayout(statuszeile)
 
-        drucken = QPushButton("Vordruck drucken")
-        drucken.clicked.connect(self.drucken)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        root.addWidget(splitter, 1)
+        oben = QWidget()
+        oben_lay = QVBoxLayout(oben)
+        oben_lay.setContentsMargins(0, 0, 0, 0)
 
-        html_export = QPushButton("Alle Vordrucke HTML")
-        html_export.clicked.connect(self.export_html_alle)
+        self.kostentabelle = QTableWidget(0, 9)
+        self.kostentabelle.setHorizontalHeaderLabels([
+            "Kostenart", "Jahresbetrag Haus", "Umlageschlüssel", "Lieferant/Versorger",
+            "Rechnungsnummer", "Rechnungsdatum", "Rechnung PDF", "Status", "Bemerkung",
+        ])
+        widths = [230, 145, 210, 190, 145, 120, 210, 110, 260]
+        for column, width in enumerate(widths):
+            self.kostentabelle.setColumnWidth(column, width)
+        self.kostentabelle.setAlternatingRowColors(True)
+        self.kostentabelle.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        oben_lay.addWidget(self.kostentabelle, 1)
 
-        excel_export = QPushButton("Excel Export")
-        excel_export.clicked.connect(self.export_excel)
+        kosten_btns = QHBoxLayout()
+        buttons = [
+            ("Kostenart hinzufügen", self.kostenart_hinzufuegen),
+            ("Standard-Kostenarten", self.standard_kostenarten),
+            ("Zeile entfernen", self.kostenart_entfernen),
+            ("PDF zuordnen", self.pdf_zuordnen),
+            ("PDF öffnen", self.pdf_oeffnen),
+            ("Jetzt speichern", self.kosten_speichern),
+        ]
+        for label, slot in buttons:
+            btn = QPushButton(label)
+            btn.clicked.connect(slot)
+            if label == "Jetzt speichern":
+                btn.setObjectName("primaryButton")
+            kosten_btns.addWidget(btn)
+        kosten_btns.addStretch()
+        oben_lay.addLayout(kosten_btns)
+        splitter.addWidget(oben)
 
-        row.addWidget(QLabel("Abrechnungsjahr:"))
-        row.addWidget(self.jahr)
-        row.addWidget(berechnen)
-        row.addWidget(drucken)
-        row.addWidget(html_export)
-        row.addWidget(excel_export)
-        row.addStretch()
-        root.addLayout(row)
+        unten = QWidget()
+        unten_lay = QVBoxLayout(unten)
+        unten_lay.setContentsMargins(0, 0, 0, 0)
+        action = QHBoxLayout()
+        self.berechnen_btn = QPushButton("Mieterabrechnungen erstellen")
+        self.berechnen_btn.setObjectName("primaryButton")
+        self.berechnen_btn.clicked.connect(self.laden)
+        for btn in [
+            self.berechnen_btn,
+            self._button("Ausgewählte drucken", self.drucken),
+            self._button("Ausgewählte als PDF", self.pdf_einzeln),
+            self._button("Alle PDFs erstellen", self.pdf_alle),
+            self._button("Jahr fertigstellen", self.jahr_fertigstellen),
+            self._button("Firmenlayout bearbeiten", self.firmenlayout),
+        ]:
+            action.addWidget(btn)
+        action.addStretch()
+        unten_lay.addLayout(action)
 
         self.tabs = QTabWidget()
-        root.addWidget(self.tabs, 1)
-
         self.table = QTableWidget()
         self.table_pruefung = QTableWidget()
+        self.table_vergleich = QTableWidget()
         self.preview = QTextEdit()
         self.preview.setReadOnly(True)
-
-        self.tabs.addTab(self.table, "Abrechnungen")
-        self.tabs.addTab(self.table_pruefung, "Prüfung")
-        self.tabs.addTab(self.preview, "Vordruck Vorschau")
+        self.tabs.addTab(self.table, "Mieterabrechnungen")
+        self.tabs.addTab(self.table_pruefung, "Plausibilitätsprüfung")
+        self.tabs.addTab(self.table_vergleich, "Vorjahresvergleich")
+        self.tabs.addTab(self.preview, "Firmenvordruck")
+        unten_lay.addWidget(self.tabs, 1)
+        splitter.addWidget(unten)
+        splitter.setSizes([430, 390])
 
         self.table.itemSelectionChanged.connect(self.vorschau_aktualisieren)
-        self.laden()
+        self.objekt.currentTextChanged.connect(self.kosten_laden)
+        self.jahr.currentTextChanged.connect(self.kosten_laden)
+        self.jahresstatus.currentTextChanged.connect(self._geaendert)
+        self.kostentabelle.itemChanged.connect(self._geaendert)
+        self.kosten_laden()
+
+    @staticmethod
+    def _button(text: str, slot) -> QPushButton:
+        btn = QPushButton(text)
+        btn.clicked.connect(slot)
+        return btn
 
     @staticmethod
     def _jahre() -> list[str]:
-        jahre = set()
+        years = {str(datetime.now().year), str(datetime.now().year - 1)}
         for titel in ["Zahlungen", "Betriebskosten", "Mieter"]:
             for row in DATA.get(titel, []):
                 for value in row:
-                    jahr = jahr_aus_datum_oder_text(value)
-                    if jahr:
-                        jahre.add(jahr)
-        return sorted(jahre) or [""]
+                    year = jahr_aus_datum_oder_text(value)
+                    if year:
+                        years.add(year)
+        return sorted(years, reverse=True)
+
+    def kostenart_hinzufuegen(self, art: str = "", **values: Any) -> None:
+        row = self.kostentabelle.rowCount()
+        self.kostentabelle.insertRow(row)
+        pos = bk_leere_position(art)
+        pos.update(values)
+        for column, key in [
+            (self.COL_ART, "art"), (self.COL_BETRAG, "betrag"), (self.COL_LIEFERANT, "lieferant"),
+            (self.COL_NR, "rechnungsnummer"), (self.COL_DATUM, "rechnungsdatum"),
+            (self.COL_PDF, "pdf"), (self.COL_NOTIZ, "bemerkung"),
+        ]:
+            value = pos.get(key, "")
+            if key == "betrag":
+                value = "" if float(value or 0) <= 0 else f"{float(value):.2f}"
+            self.kostentabelle.setItem(row, column, QTableWidgetItem(str(value)))
+        umlage = QComboBox()
+        umlage.addItems(BK_UMLAGESCHLUESSEL)
+        umlage.setCurrentText(str(pos.get("umlage", BK_UMLAGESCHLUESSEL[0])))
+        umlage.currentTextChanged.connect(self._geaendert)
+        self.kostentabelle.setCellWidget(row, self.COL_UMLAGE, umlage)
+        status = QComboBox()
+        status.addItems(BK_STATUSWERTE)
+        status.setCurrentText(str(pos.get("status", "Offen")))
+        status.currentTextChanged.connect(self._geaendert)
+        self.kostentabelle.setCellWidget(row, self.COL_STATUS, status)
+
+    def standard_kostenarten(self) -> None:
+        vorhandene = {
+            norm_key(self.kostentabelle.item(row, self.COL_ART).text())
+            for row in range(self.kostentabelle.rowCount())
+            if self.kostentabelle.item(row, self.COL_ART)
+        }
+        for art in STANDARD_BK_KOSTENARTEN:
+            if norm_key(art) not in vorhandene:
+                self.kostenart_hinzufuegen(art)
+        self._geaendert()
+
+    def kostenart_entfernen(self) -> None:
+        rows = sorted({item.row() for item in self.kostentabelle.selectedIndexes()}, reverse=True)
+        for row in rows:
+            self.kostentabelle.removeRow(row)
+        self._geaendert()
+
+    def kostenpositionen(self, auch_leere: bool = True) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for row in range(self.kostentabelle.rowCount()):
+            def text_at(column: int) -> str:
+                item = self.kostentabelle.item(row, column)
+                return item.text().strip() if item else ""
+            umlage = self.kostentabelle.cellWidget(row, self.COL_UMLAGE)
+            status = self.kostentabelle.cellWidget(row, self.COL_STATUS)
+            pos = {
+                "art": text_at(self.COL_ART),
+                "betrag": betrag_de(text_at(self.COL_BETRAG)),
+                "umlage": umlage.currentText() if isinstance(umlage, QComboBox) else BK_UMLAGESCHLUESSEL[0],
+                "lieferant": text_at(self.COL_LIEFERANT),
+                "rechnungsnummer": text_at(self.COL_NR),
+                "rechnungsdatum": text_at(self.COL_DATUM),
+                "pdf": text_at(self.COL_PDF),
+                "status": status.currentText() if isinstance(status, QComboBox) else "Offen",
+                "bemerkung": text_at(self.COL_NOTIZ),
+            }
+            if pos["art"] and (auch_leere or pos["betrag"] > 0):
+                result.append(pos)
+        return result
+
+    def _geaendert(self, *_args) -> None:
+        if self._ladevorgang:
+            return
+        self._dirty = True
+        self.status_aktualisieren()
+        self.autosave_timer.start()
+
+    def _autosave(self) -> None:
+        if not self._dirty:
+            return
+        self.kosten_speichern(leise=True)
+
+    def kosten_laden(self, *_args) -> None:
+        self.autosave_timer.stop()
+        self._ladevorgang = True
+        self.kostentabelle.blockSignals(True)
+        self.kostentabelle.setRowCount(0)
+        record = bk_jahresdatensatz_laden(self.objekt.currentText().strip(), self.jahr.currentText().strip())
+        self.jahresstatus.setCurrentText(str(record.get("status", "Entwurf")))
+        for pos in record.get("kosten", []):
+            values = dict(pos)
+            art = str(values.pop("art", ""))
+            self.kostenart_hinzufuegen(art, **values)
+        self.kostentabelle.blockSignals(False)
+        self._ladevorgang = False
+        self._dirty = False
+        self.abrechnungen = []
+        self._tabelle_fuellen()
+        self.status_aktualisieren()
+        self.pruefung_aktualisieren()
+        self.vergleich_aktualisieren()
+        self.vorschau_aktualisieren()
+
+    def kosten_speichern(self, _checked: bool = False, leise: bool = False) -> bool:
+        objekt, jahr = self.objekt.currentText().strip(), self.jahr.currentText().strip()
+        if not objekt or not jahr:
+            if not leise:
+                QMessageBox.information(self, "BK-Verwaltungscenter", "Bitte Objekt und Jahr auswählen.")
+            return False
+        try:
+            bk_jahresdatensatz_speichern(
+                objekt, jahr, self.kostenpositionen(True), self.jahresstatus.currentText()
+            )
+        except OSError as exc:
+            QMessageBox.warning(self, "Speicherfehler", str(exc))
+            return False
+        self._dirty = False
+        if not leise:
+            QMessageBox.information(self, "Gespeichert", "Der aktuelle Zwischenstand wurde gespeichert.")
+        self.vergleich_aktualisieren()
+        return True
+
+    def status_aktualisieren(self) -> None:
+        positionen = self.kostenpositionen(True)
+        total = len(positionen)
+        complete = sum(
+            1 for pos in positionen
+            if pos["betrag"] > 0 and pos["umlage"] and pos["status"] in {"Erfasst", "Geprüft"}
+        )
+        open_count = sum(1 for pos in positionen if pos["status"] == "Offen" or pos["betrag"] <= 0)
+        percent = round(complete / total * 100) if total else 0
+        self.fortschritt.setValue(percent)
+        self.fortschritt_label.setText(f"{complete} von {total} Positionen vollständig ({percent} %)")
+        self.offen_label.setText(f"Offen: {open_count}")
+        self.summe_label.setText("Summe: " + waehrung(sum(float(pos["betrag"]) for pos in positionen)))
+        self.berechnen_btn.setEnabled(any(pos["betrag"] > 0 for pos in positionen))
+
+    def pdf_zuordnen(self) -> None:
+        row = self.kostentabelle.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "Beleg", "Bitte zuerst eine Kostenart markieren.")
+            return
+        art_item = self.kostentabelle.item(row, self.COL_ART)
+        art = art_item.text().strip() if art_item else "Betriebskosten"
+        path, _ = QFileDialog.getOpenFileName(self, "Rechnung auswählen", "", "PDF-Dateien (*.pdf)")
+        if path:
+            gespeichert = bk_rechnung_kopieren(path, self.objekt.currentText(), self.jahr.currentText(), art)
+            self.kostentabelle.setItem(row, self.COL_PDF, QTableWidgetItem(gespeichert))
+            status = self.kostentabelle.cellWidget(row, self.COL_STATUS)
+            if isinstance(status, QComboBox) and status.currentText() == "Offen":
+                status.setCurrentText("Erfasst")
+            self._geaendert()
+
+    def pdf_oeffnen(self) -> None:
+        row = self.kostentabelle.currentRow()
+        item = self.kostentabelle.item(row, self.COL_PDF) if row >= 0 else None
+        path = item.text().strip() if item else ""
+        if not path:
+            QMessageBox.information(self, "Beleg", "Für diese Kostenart ist keine Rechnung hinterlegt.")
+            return
+        system_datei_oeffnen(path)
+
+    def pruefungsliste(self) -> list[list[str]]:
+        issues: list[list[str]] = []
+        kosten = self.kostenpositionen(True)
+        if not kosten:
+            issues.append(["Kritisch", "Jahresabrechnung", "Keine Kostenarten vorhanden."])
+        for pos in kosten:
+            art = pos["art"] or "Unbenannte Kostenart"
+            if pos["betrag"] <= 0:
+                issues.append(["Offen", art, "Jahresbetrag fehlt."])
+            if not pos["umlage"]:
+                issues.append(["Kritisch", art, "Umlageschlüssel fehlt."])
+            if pos["status"] == "Offen":
+                issues.append(["Offen", art, "Position ist noch als offen markiert."])
+            if pos["betrag"] > 0 and not pos["pdf"]:
+                issues.append(["Hinweis", art, "Keine Originalrechnung als PDF hinterlegt."])
+        for _index, row in bk_mieter_fuer_objekt(self.objekt.currentText().strip()):
+            name = zeilenwert("Mieter", row, "Mieter")
+            objekt, wohnung = mieter_objekt_wohnung(row)
+            if not wohnung:
+                issues.append(["Kritisch", name, "Wohnung konnte nicht zugeordnet werden."])
+            if any(pos["umlage"] == "Wohnfläche (m²)" and pos["betrag"] > 0 for pos in kosten):
+                if bk_wohnflaeche(row, wohnung, objekt) <= 0:
+                    issues.append(["Kritisch", name, "Wohnfläche fehlt für Umlage nach m²."])
+            if bk_vorauszahlung(row, self.jahr.currentText()) <= 0:
+                issues.append(["Hinweis", name, "Keine BK-Vorauszahlung im Abrechnungszeitraum ermittelt."])
+        return issues
+
+    def pruefung_aktualisieren(self) -> None:
+        issues = self.pruefungsliste()
+        self.table_pruefung.setColumnCount(3)
+        self.table_pruefung.setHorizontalHeaderLabels(["Priorität", "Bezug", "Beschreibung"])
+        self.table_pruefung.setRowCount(len(issues))
+        for row, values in enumerate(issues):
+            for column, value in enumerate(values):
+                self.table_pruefung.setItem(row, column, QTableWidgetItem(value))
+        self.table_pruefung.setColumnWidth(0, 110)
+        self.table_pruefung.setColumnWidth(1, 250)
+        self.table_pruefung.setColumnWidth(2, 720)
 
     def laden(self) -> None:
-        jahr = self.jahr.currentText().strip()
-        self.abrechnungen = bk_abrechnung_berechnen(jahr)
+        objekt, jahr = self.objekt.currentText().strip(), self.jahr.currentText().strip()
+        kosten = [pos for pos in self.kostenpositionen(True) if pos["betrag"] > 0]
+        if not objekt or not kosten:
+            QMessageBox.information(self, "BK-Center", "Bitte Objekt und mindestens eine Kostenposition mit Betrag erfassen.")
+            return
+        self.kosten_speichern(leise=True)
+        critical = [issue for issue in self.pruefungsliste() if issue[0] == "Kritisch"]
+        if critical:
+            text = "\n".join(f"• {issue[1]}: {issue[2]}" for issue in critical[:12])
+            QMessageBox.warning(self, "Abrechnung nicht möglich", "Bitte zuerst folgende kritische Punkte beheben:\n\n" + text)
+            self.pruefung_aktualisieren()
+            self.tabs.setCurrentWidget(self.table_pruefung)
+            return
+        self.abrechnungen = bk_abrechnung_berechnen(jahr, objekt, kostenpositionen=kosten)
+        if not self.abrechnungen:
+            QMessageBox.warning(self, "BK-Center", "Für dieses Objekt wurden keine Mieter mit Nutzungszeitraum gefunden.")
+        self._tabelle_fuellen()
+        self.pruefung_aktualisieren()
+        self.vorschau_aktualisieren()
 
-        headers = ["Mieter", "Objekt", "Wohnung", "Wohnfläche", "Vorauszahlung", "Ist-BK", "Nachzahlung", "Guthaben", "Status"]
+    def _tabelle_fuellen(self) -> None:
+        headers = ["Mieter", "Objekt", "Wohnung", "Nutzungstage", "Wohnfläche", "Vorauszahlung", "Ist-BK", "Nachzahlung", "Guthaben", "Status"]
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
         self.table.setRowCount(len(self.abrechnungen))
         self.table.setAlternatingRowColors(True)
-        self.table.setWordWrap(False)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-
-        for r, a in enumerate(self.abrechnungen):
+        for row, item in enumerate(self.abrechnungen):
             values = [
-                a["mieter"], a["objekt"], a["wohnung"], f'{a["wohnflaeche"]:.2f}',
-                f'{a["vorauszahlung"]:.2f}', f'{a["ist"]:.2f}',
-                f'{a["nachzahlung"]:.2f}', f'{a["guthaben"]:.2f}', a["status"]
+                item["mieter"], item["objekt"], item["wohnung"], item["nutzungstage"],
+                f'{item["wohnflaeche"]:.2f}', f'{item["vorauszahlung"]:.2f}',
+                f'{item["ist"]:.2f}', f'{item["nachzahlung"]:.2f}',
+                f'{item["guthaben"]:.2f}', item["status"],
             ]
-            for c, value in enumerate(values):
-                self.table.setItem(r, c, QTableWidgetItem(str(value)))
-
-        widths = [220, 220, 180, 120, 140, 120, 140, 120, 140]
-        for c, w in enumerate(widths):
-            self.table.setColumnWidth(c, w)
-
+            for column, value in enumerate(values):
+                self.table.setItem(row, column, QTableWidgetItem(str(value)))
+        widths = [220, 210, 170, 105, 110, 130, 120, 130, 120, 130]
+        for column, width in enumerate(widths):
+            self.table.setColumnWidth(column, width)
         if self.abrechnungen:
             self.table.selectRow(0)
-        self.pruefung_aktualisieren()
-        self.vorschau_aktualisieren()
 
+    def vergleich_aktualisieren(self) -> None:
+        objekt = self.objekt.currentText().strip()
+        try:
+            jahr = int(self.jahr.currentText().strip())
+        except ValueError:
+            jahr = datetime.now().year
+        current = {norm_key(pos["art"]): pos for pos in bk_jahreskosten_laden(objekt, str(jahr))}
+        previous = {norm_key(pos["art"]): pos for pos in bk_jahreskosten_laden(objekt, str(jahr - 1))}
+        keys = sorted(set(current) | set(previous), key=lambda key: (current.get(key) or previous.get(key) or {}).get("art", "").lower())
+        self.table_vergleich.setColumnCount(6)
+        self.table_vergleich.setHorizontalHeaderLabels(["Kostenart", str(jahr - 1), str(jahr), "Differenz", "Änderung %", "Bewertung"])
+        self.table_vergleich.setRowCount(len(keys))
+        for row, key in enumerate(keys):
+            old = float(previous.get(key, {}).get("betrag", 0) or 0)
+            new = float(current.get(key, {}).get("betrag", 0) or 0)
+            diff = new - old
+            percent = (diff / old * 100) if old else (100.0 if new else 0.0)
+            rating = "stark gestiegen" if percent > 15 else ("gestiegen" if percent > 5 else ("gesunken" if percent < -5 else "unauffällig"))
+            art = str((current.get(key) or previous.get(key) or {}).get("art", ""))
+            values = [art, waehrung(old), waehrung(new), waehrung(diff), f"{percent:.1f} %", rating]
+            for column, value in enumerate(values):
+                self.table_vergleich.setItem(row, column, QTableWidgetItem(value))
+        for column, width in enumerate([260, 140, 140, 140, 120, 160]):
+            self.table_vergleich.setColumnWidth(column, width)
 
-    def pruefung_aktualisieren(self) -> None:
-        hinweise: list[list[str]] = []
-
-        for a in self.abrechnungen:
-            if not str(a.get("mieter", "")).strip():
-                hinweise.append(["Fehlender Mieter", "", "", "Mietername fehlt."])
-            if not str(a.get("objekt", "")).strip():
-                hinweise.append(["Fehlendes Objekt", str(a.get("mieter", "")), "", "Objekt konnte nicht zugeordnet werden."])
-            if not str(a.get("wohnung", "")).strip():
-                hinweise.append(["Fehlende Wohnung", str(a.get("mieter", "")), str(a.get("objekt", "")), "Wohnung konnte nicht zugeordnet werden."])
-            if float(a.get("vorauszahlung", 0.0)) <= 0:
-                hinweise.append(["Keine Vorauszahlung", str(a.get("mieter", "")), str(a.get("objekt", "")), "BK-Vorauszahlung jährlich/monatlich fehlt."])
-            if float(a.get("ist", 0.0)) <= 0:
-                hinweise.append(["Keine Ist-BK", str(a.get("mieter", "")), str(a.get("objekt", "")), "Keine Ist-Betriebskosten oder umlagefähigen Kosten gefunden."])
-
-        self.table_pruefung.setColumnCount(4)
-        self.table_pruefung.setHorizontalHeaderLabels(["Hinweis", "Mieter", "Objekt", "Beschreibung"])
-        self.table_pruefung.setRowCount(len(hinweise))
-        self.table_pruefung.setAlternatingRowColors(True)
-        self.table_pruefung.setWordWrap(False)
-        self.table_pruefung.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.table_pruefung.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-
-        for r, row in enumerate(hinweise):
-            for c, value in enumerate(row):
-                self.table_pruefung.setItem(r, c, QTableWidgetItem(str(value)))
-
-        self.table_pruefung.setColumnWidth(0, 190)
-        self.table_pruefung.setColumnWidth(1, 220)
-        self.table_pruefung.setColumnWidth(2, 220)
-        self.table_pruefung.setColumnWidth(3, 520)
-
+    def jahr_fertigstellen(self) -> None:
+        issues = self.pruefungsliste()
+        blocking = [issue for issue in issues if issue[0] in {"Kritisch", "Offen"}]
+        if blocking:
+            QMessageBox.warning(self, "Noch nicht vollständig", "Die Jahresabrechnung enthält noch offene oder kritische Punkte. Details stehen in der Plausibilitätsprüfung.")
+            self.tabs.setCurrentWidget(self.table_pruefung)
+            return
+        self.jahresstatus.setCurrentText("Fertig")
+        self.kosten_speichern(leise=True)
+        QMessageBox.information(self, "Fertiggestellt", "Die Jahresabrechnung wurde als fertig markiert. PDFs können nun endgültig erstellt werden.")
 
     def aktueller_eintrag(self) -> dict[str, Any] | None:
         row = self.table.currentRow()
-        if row < 0 or row >= len(self.abrechnungen):
-            return None
-        return self.abrechnungen[row]
+        return self.abrechnungen[row] if 0 <= row < len(self.abrechnungen) else None
 
     def vorschau_aktualisieren(self) -> None:
         eintrag = self.aktueller_eintrag()
-        if not eintrag:
-            self.preview.setHtml("<p>Keine Abrechnung ausgewählt.</p>")
-            return
-        self.preview.setHtml(bk_abrechnung_html(eintrag))
+        self.preview.setHtml(bk_abrechnung_html(eintrag) if eintrag else "<p>Noch keine Abrechnung berechnet.</p>")
 
     def drucken(self) -> None:
         eintrag = self.aktueller_eintrag()
         if not eintrag:
-            QMessageBox.information(self, "Drucken", "Bitte zuerst einen Mieter auswählen.")
+            QMessageBox.information(self, "Drucken", "Bitte zuerst eine Abrechnung auswählen.")
             return
-
         doc = QTextDocument()
         doc.setHtml(bk_abrechnung_html(eintrag))
-
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         dialog = QPrintDialog(printer, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             doc.print_(printer)
 
-    def export_html_alle(self) -> None:
-        if not self.abrechnungen:
-            QMessageBox.information(self, "Export", "Keine Abrechnungen vorhanden.")
+    def pdf_einzeln(self) -> None:
+        eintrag = self.aktueller_eintrag()
+        if not eintrag:
+            QMessageBox.information(self, "PDF", "Bitte zuerst eine Abrechnung auswählen.")
             return
-
-        EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-        jahr = self.jahr.currentText().strip()
-        ziel = EXPORT_DIR / f"bk_abrechnungen_{jahr}.html"
-
-        html = "<html><head><meta charset='utf-8'></head><body>"
-        for index, a in enumerate(self.abrechnungen):
-            html += bk_abrechnung_html(a)
-            if index < len(self.abrechnungen) - 1:
-                html += "<div style='page-break-after: always;'></div>"
-        html += "</body></html>"
-
-        ziel.write_text(html, encoding="utf-8")
-        QMessageBox.information(self, "Export", f"Vordrucke exportiert:\n{ziel}")
+        ziel = bk_pdf_speichern(eintrag)
+        bk_mieterfelder_aktualisieren(eintrag, ziel)
+        speichere_tabelle("Mieter")
+        QMessageBox.information(self, "PDF", f"Abrechnung gespeichert und beim Mieter hinterlegt:\n{ziel}")
         system_datei_oeffnen(str(ziel))
 
-    def export_excel(self) -> None:
+    def pdf_alle(self) -> None:
         if not self.abrechnungen:
-            QMessageBox.information(self, "Export", "Keine Abrechnungen vorhanden.")
+            QMessageBox.information(self, "PDF", "Bitte zuerst die Mieterabrechnungen erstellen.")
             return
+        zielordner = None
+        for eintrag in self.abrechnungen:
+            ziel = bk_pdf_speichern(eintrag)
+            zielordner = ziel.parent
+            bk_mieterfelder_aktualisieren(eintrag, ziel)
+        speichere_tabelle("Mieter")
+        QMessageBox.information(self, "PDF", f"{len(self.abrechnungen)} Abrechnungen wurden erstellt und bei den Mietern hinterlegt.\n{zielordner}")
+        if zielordner:
+            system_datei_oeffnen(str(zielordner))
 
-        from datetime import datetime
+    def firmenlayout(self) -> None:
+        dialog = EinstellungenDialog()
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.vorschau_aktualisieren()
 
-        EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-        ziel_default = EXPORT_DIR / f"bk_abrechnung_{self.jahr.currentText()}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
-
-        ziel_text, _ = QFileDialog.getSaveFileName(
-            self,
-            "BK-Abrechnung exportieren",
-            str(ziel_default),
-            "Excel-Dateien (*.xlsx)",
-        )
-        if not ziel_text:
-            return
-
-        ziel = Path(ziel_text)
-        if ziel.suffix.lower() != ".xlsx":
-            ziel = ziel.with_suffix(".xlsx")
-
-        wb = Workbook()
-        ws = wb.active
-
-        if not isinstance(ws, Worksheet):
-            QMessageBox.warning(self, "Export", "Excel-Arbeitsblatt konnte nicht erstellt werden.")
-            return
-
-        ws.title = "BK-Abrechnung"
-        ws.append(["Jahr", "Mieter", "Objekt", "Wohnung", "Wohnfläche", "Vorauszahlung", "Ist-BK", "Nachzahlung", "Guthaben", "Status"])
-
-        for a in self.abrechnungen:
-            ws.append([
-                a["jahr"], a["mieter"], a["objekt"], a["wohnung"], a["wohnflaeche"],
-                a["vorauszahlung"], a["ist"], a["nachzahlung"], a["guthaben"], a["status"]
-            ])
-
-        for col_index, _col in enumerate(ws.columns, start=1):
-            ws.column_dimensions[get_column_letter(col_index)].width = 24
-
-        wb.save(ziel)
-        QMessageBox.information(self, "Export", f"BK-Abrechnung exportiert:\n{ziel}")
-        system_datei_oeffnen(str(ziel.parent))
-
-
+    def closeEvent(self, event) -> None:
+        if self._dirty:
+            self.kosten_speichern(leise=True)
+        super().closeEvent(event)
 
 def safe_filename(text: str) -> str:
     text = str(text or "").strip()
@@ -4550,6 +5930,113 @@ def dokumenten_treffer() -> list[dict[str, str]]:
 
     return treffer
 
+
+
+def dokumenten_index_rows() -> list[dict[str, str]]:
+    """
+    Erstellt einen einheitlichen Dokumentenindex aus allen vorhandenen Tabellen.
+
+    Die Funktion verändert keine Exceldatei. Relative Dateipfade werden gegen
+    den Programm-, Dokumenten- und Datenordner geprüft.
+    """
+    result: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    file_extensions = {
+        ".pdf", ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif",
+        ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt", ".md",
+        ".json", ".xml", ".zip",
+    }
+
+    file_field_tokens = {
+        "pdf", "datei", "dokument", "pfad", "anlage", "anhang",
+        "foto", "bild", "scan", "beleg", "rechnung",
+    }
+
+    for bereich, rows in DATA.items():
+        felder = SCHEMA.get(bereich, [])
+
+        for row_index, row in enumerate(rows, start=1):
+            objekt = objektordner_fuer_datensatz(bereich, row)
+            wohnung = feldwert(bereich, row, ["Wohnung", "Wohnungsordner"])
+            mieter = feldwert(bereich, row, ["Mieter", "Name"])
+            row_text = " | ".join(str(value or "") for value in row)
+
+            for column_index, raw_value in enumerate(row):
+                value = str(raw_value or "").strip()
+                if not value:
+                    continue
+
+                feld = (
+                    str(felder[column_index])
+                    if column_index < len(felder)
+                    else f"Spalte {column_index + 1}"
+                )
+                field_key = norm_key(feld)
+
+                suffix = Path(value).suffix.lower()
+                is_file_field = any(
+                    token in field_key for token in file_field_tokens
+                )
+                looks_like_file = suffix in file_extensions
+
+                if not is_file_field and not looks_like_file:
+                    continue
+
+                raw_path = Path(value)
+                candidates: list[Path] = []
+
+                if raw_path.is_absolute():
+                    candidates.append(raw_path)
+                else:
+                    candidates.extend([
+                        APP_DIR / raw_path,
+                        DOKUMENTE_DIR / raw_path,
+                        DATEN_DIR / raw_path,
+                        raw_path,
+                    ])
+
+                existing_path = next(
+                    (candidate for candidate in candidates if candidate.exists()),
+                    None,
+                )
+                resolved_path = existing_path or candidates[0]
+
+                title = Path(value).name or feld
+                status = "Vorhanden" if existing_path is not None else "Fehlt"
+
+                unique_key = (
+                    bereich,
+                    str(row_index),
+                    str(resolved_path),
+                )
+                if unique_key in seen:
+                    continue
+                seen.add(unique_key)
+
+                result.append({
+                    "bereich": bereich,
+                    "zeile": str(row_index),
+                    "feld": feld,
+                    "titel": title,
+                    "datei": Path(value).name,
+                    "pfad": str(resolved_path),
+                    "objekt": objekt,
+                    "wohnung": wohnung,
+                    "mieter": mieter,
+                    "status": status,
+                    "dateityp": suffix.lstrip(".").upper() if suffix else "DATEI",
+                    "inhalt": row_text,
+                })
+
+    result.sort(
+        key=lambda item: (
+            item.get("status", "") != "Fehlt",
+            item.get("bereich", "").lower(),
+            item.get("titel", "").lower(),
+        )
+    )
+    return result
 
 def dokument_kategorie(feld: str, datei: str) -> str:
     text = f"{feld} {datei}".lower()
@@ -4842,7 +6329,6 @@ class AktenCenterSeite(QWidget):
             QMessageBox.information(self, "Export", "Keine Dokumente zum Exportieren.")
             return
 
-        from datetime import datetime
 
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         ziel_default = EXPORT_DIR / f"dokumentenliste_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
@@ -4992,7 +6478,7 @@ class GlobaleSucheSeite(QWidget):
         root.addWidget(self.table, 1)
 
         quick = QHBoxLayout()
-        for label in ["Offen", "Miete", "Nachzahlung", "Guthaben", "Eigenbestand", "Fremdverwaltung"]:
+        for label in ["Offen", "Miete", "Nachzahlung", "Guthaben"]:
             b = QPushButton(label)
             b.clicked.connect(lambda checked=False, text=label: self.quick_search(text))
             quick.addWidget(b)
@@ -5044,7 +6530,6 @@ class GlobaleSucheSeite(QWidget):
             QMessageBox.information(self, "Export", "Keine Treffer zum Exportieren.")
             return
 
-        from datetime import datetime
 
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         ziel_default = EXPORT_DIR / f"globale_suche_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.xlsx"
@@ -5142,25 +6627,6 @@ def cockpit_werte() -> dict[str, float]:
     }
 
 
-def ereignis_schreiben(bereich: str, aktion: str, beschreibung: str = "") -> None:
-    try:
-        from datetime import datetime
-        jetzt = datetime.now()
-        DATA.setdefault("Ereignisprotokoll", []).append([
-            jetzt.strftime("%d.%m.%Y"),
-            jetzt.strftime("%H:%M:%S"),
-            bereich,
-            aktion,
-            "",
-            "",
-            "",
-            beschreibung,
-            "",
-            "OK",
-        ])
-        speichere_tabelle("Ereignisprotokoll")
-    except (OSError, ValueError, TypeError, AttributeError, RuntimeError, KeyError, IndexError):
-        pass
 
 
 
@@ -5626,54 +7092,6 @@ def konto_find(row: dict[str, str], names: list[str]) -> str:
     return ""
 
 
-def konto_mieter_match(text: str, betrag: float) -> dict[str, str]:
-    full = norm_key(text)
-
-    bester = {"mieter": "", "objekt": "", "wohnung": "", "status": "Unklar", "hinweis": "Kein eindeutiger Mieter erkannt"}
-
-    for row in DATA.get("Mieter", []):
-        felder = SCHEMA.get("Mieter", [])
-
-        def val(field_name: str) -> str:
-            for i, feld in enumerate(felder):
-                if norm_key(feld) == norm_key(field_name) and i < len(row):
-                    return str(row[i])
-            return ""
-
-        mieter = val("Mieter") or (str(row[0]) if row else "")
-        ort = val("Ort")
-        objekt = val("Objektordner")
-        wohnung = val("Wohnungsordner")
-        soll = konto_betrag(val("Miete") or val("Warmmiete"))
-
-        hit_name = norm_key(mieter) and norm_key(mieter) in full
-        hit_objekt = norm_key(objekt) and norm_key(objekt) in full
-        hit_wohnung = norm_key(wohnung) and norm_key(wohnung) in full
-        hit_ort = norm_key(ort) and norm_key(ort) in full
-        hit_betrag = soll > 0 and abs(abs(betrag) - soll) <= 2.0
-
-        score = 0
-        if hit_name:
-            score += 5
-        if hit_objekt:
-            score += 2
-        if hit_wohnung:
-            score += 2
-        if hit_ort:
-            score += 3
-        if hit_betrag:
-            score += 3
-
-        if score >= 5:
-            return {
-                "mieter": mieter,
-                "objekt": objekt or ort.split("/")[0].strip() if "/" in ort else objekt,
-                "wohnung": wohnung or ort.split("/")[-1].strip() if "/" in ort else wohnung,
-                "status": "Erkannt",
-                "hinweis": f"Mieter erkannt, Score {score}",
-            }
-
-    return bester
 
 
 
@@ -6450,8 +7868,8 @@ CURRENT_USER: dict[str, str] = {"name": "", "rolle": "", "benutzername": ""}
 
 def login_standard_benutzer() -> list[list[str]]:
     return [
-        ["Julia", "julia", "julia123", "Mitarbeiter", "Aktiv", "", "Standard-Testlogin"],
-        ["Franzi", "franzi", "franzi123", "Mitarbeiter", "Aktiv", "", "Standard-Testlogin"],
+        ["Julia", "julia", "julia123", "Admin", "Aktiv", "", "Administratorin"],
+        ["Franzi", "franzi", "franzi123", "Admin", "Aktiv", "", "Administratorin"],
         ["Robert", "robert", "robert123", "Mitarbeiter", "Aktiv", "", "Standard-Testlogin"],
         ["Ralf", "ralf", "ralf123", "Mitarbeiter", "Aktiv", "", "Standard-Testlogin"],
         ["Admin", "admin", "admin123", "Admin", "Aktiv", "", "Standard-Testlogin"],
@@ -6462,11 +7880,27 @@ def login_benutzer_laden() -> list[list[str]]:
     rows = DATA.get("Mitarbeiter-Login", [])
     if not rows:
         DATA["Mitarbeiter-Login"] = login_standard_benutzer()
+        rows = DATA.get("Mitarbeiter-Login", [])
+
+    changed = False
+    for row in rows:
+        while len(row) < len(SCHEMA.get("Mitarbeiter-Login", [])):
+            row.append("")
+        name = norm_key(row[0] if row else "")
+        if name in {"julia", "franzi"}:
+            if len(row) > 3 and norm_key(row[3]) != "admin":
+                row[3] = "Admin"
+                changed = True
+            if len(row) > 6 and not str(row[6]).strip():
+                row[6] = "Administratorin"
+                changed = True
+
+    if changed or not xlsx_pfad("Mitarbeiter-Login").exists():
         try:
             speichere_tabelle("Mitarbeiter-Login")
         except (OSError, ValueError, TypeError, AttributeError, RuntimeError, KeyError, IndexError):
             pass
-        rows = DATA.get("Mitarbeiter-Login", [])
+
     return rows
 
 
@@ -6482,6 +7916,8 @@ def login_pruefen(benutzername: str, passwort: str) -> dict[str, str] | None:
         status = str(row[4] if len(row) > 4 else "").strip().lower()
 
         if user == benutzername and pw == passwort and status == "aktiv":
+            if norm_key(employee_name) in {"julia", "franzi"}:
+                rolle = "Admin"
             return {"name": employee_name, "rolle": rolle, "benutzername": user}
 
     return None
@@ -6489,7 +7925,6 @@ def login_pruefen(benutzername: str, passwort: str) -> dict[str, str] | None:
 
 def login_letzten_login_speichern(benutzername: str) -> None:
     try:
-        from datetime import datetime
         rows = DATA.get("Mitarbeiter-Login", [])
         for row in rows:
             if len(row) > 1 and str(row[1]).strip().lower() == str(benutzername).strip().lower():
@@ -6550,7 +7985,7 @@ class LoginDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         layout.addLayout(btn_row)
 
-        hint = QLabel("Standard-Testzugänge: julia/julia123, franzi/franzi123, robert/robert123, ralf/ralf123, admin/admin123")
+        hint = QLabel("Standard-Zugänge: julia, franzi, robert, ralf, admin")
         hint.setWordWrap(True)
         hint.setStyleSheet("color:#64748b; font-size:10px;")
         layout.addWidget(hint)
@@ -6601,7 +8036,6 @@ def offene_aufgaben_rows() -> list[list[Any]]:
 
 
 def ueberfaellige_aufgaben_rows() -> list[list[Any]]:
-    from datetime import date, datetime
     heute = date.today()
     result = []
     for row in offene_aufgaben_rows():
@@ -6803,7 +8237,6 @@ class ObjektchronikSeite(QWidget):
     def exportieren(self) -> None:
         if not self.rows:
             QMessageBox.information(self, "Chronik", "Keine Chronikeinträge vorhanden."); return
-        from datetime import datetime
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         default = EXPORT_DIR / ("objektchronik_" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".xlsx")
         target, _ = QFileDialog.getSaveFileName(self, "Objektchronik exportieren", str(default), "Excel-Dateien (*.xlsx)")
@@ -6935,7 +8368,6 @@ def smart_objekt_status(objektordner: str) -> dict[str, Any]:
 
 def fristen_pro_status() -> list[dict[str, str]]:
     """Berechnet Fristenstatus anhand bestehender Tabelle Fristen."""
-    from datetime import date, datetime, timedelta
 
     heute = date.today()
     result: list[dict[str, str]] = []
@@ -7797,7 +9229,6 @@ class JahrespruefungProSeite(QWidget):
             QMessageBox.information(self, "Jahresprüfung", "Kein Prüfbericht vorhanden.")
             return
 
-        from datetime import datetime
         EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         default = EXPORT_DIR / (
             "jahrespruefung_"
@@ -7875,7 +9306,6 @@ def mitarbeiter_aufgaben(name: str, nur_offen: bool = True) -> list[list[Any]]:
 
 
 def heutige_mitarbeiter_fristen(name: str) -> list[dict[str, str]]:
-    from datetime import date, datetime
 
     heute = date.today()
     name_key = norm_key(name)
@@ -8614,14 +10044,14 @@ def benutzer_darf_seite_oeffnen(seite: str) -> bool:
     rolle = str(CURRENT_USER.get("rolle", "") or "").strip().lower()
     name = str(CURRENT_USER.get("name", "") or "").strip().lower()
 
-    if rolle == "admin" or name == "admin":
+    if rolle == "admin" or name in {"admin", "julia", "franzi"}:
         return True
 
     allgemein = {
-        "Mein Arbeitstag", "Kalender & Planung", "Smart Startseite", "Objektgalerie", "Enterprise Objekt 360°", "Dokumenten-Center 2.0", "Workflow-Regeln PRO", "Dashboard", "Verwaltungsleitstand 5.0",
-        "Globale Suche", "Dokumente", "Akten-Center",
+        "Mein Arbeitstag", "Mobiles Mitarbeiterportal", "DBS Field Import", "DBS Field Eingangszentrale", "Kalender & Planung", "Smart Startseite", "Objektgalerie", "Enterprise Objekt 360°", "Dokumenten-Center 2.0", "Workflow-Regeln PRO", "Dashboard", "Verwaltungsleitstand 5.0",
+        "Globale Suche", "Dokumente", "Dokumentenautomatisierung PRO", "Akten-Center",
         "Aufgaben", "Fristen", "Arbeitsorganisation PRO",
-        "Objektchronik", "Smart Objektakte",
+        "Objektchronik", "Smart Objektakte", "Digitaler Gebäudezwilling",
         "Fristenmanager PRO", "Workflow-Center PRO",
     }
     buchhaltung = {
@@ -8656,7 +10086,7 @@ def benutzer_darf_seite_oeffnen(seite: str) -> bool:
     if seite in {
         "Berichte & Export PRO", "System-Center PRO", "Einstellungen", "Objektordner-Prüfung",
         "Mitarbeiter-Login", "Mitarbeiter",
-        "Ereignisprotokoll", "Berechtigungen & Protokoll", "Berichte & Export PRO", "System-Center PRO",
+        "Ereignisprotokoll", "Berechtigungen & Protokoll", "Berichte & Export PRO", "System-Center PRO", "Projektmonitor",
     }:
         return False
 
@@ -8669,7 +10099,6 @@ def aktivitaet_protokollieren(
     beschreibung: str = "",
     status: str = "Erfolgreich",
 ) -> None:
-    from datetime import datetime
 
     felder = SCHEMA.get("Ereignisprotokoll", [])
     if not felder:
@@ -8698,20 +10127,20 @@ def aktivitaet_protokollieren(
 
 def berechtigungsuebersicht() -> list[dict[str, str]]:
     seiten = [
-        "Dashboard", "Verwaltungsleitstand 5.0", "Mein Arbeitstag", "Kalender & Planung",
+        "Dashboard", "Verwaltungsleitstand 5.0", "Mein Arbeitstag", "Kalender & Planung", "DBS Field Kalenderimport",
         "Objekte", "Wohnungen", "Mieter", "Mietverträge",
         "Rechnungen", "Betriebskosten", "Buchhaltung",
         "Kontoauszug-Import", "Mietkonto-Abgleich",
         "Zahlungsabgleich PRO", "Belegscanner PRO",
         "Arbeitsorganisation PRO", "Objektchronik",
-        "Smart Objektakte", "Fristenmanager PRO",
+        "Digitaler Gebäudezwilling", "Smart Objektakte", "Fristenmanager PRO",
         "Workflow-Center PRO", "Jahresprüfung PRO",
         "Einstellungen", "Objektordner-Prüfung",
     ]
 
     users = [
-        ("Julia", "Mitarbeiter"),
-        ("Franzi", "Mitarbeiter"),
+        ("Julia", "Admin"),
+        ("Franzi", "Admin"),
         ("Robert", "Mitarbeiter"),
         ("Ralf", "Mitarbeiter"),
         ("Admin", "Admin"),
@@ -8828,7 +10257,6 @@ class BerechtigungenProtokollSeite(QWidget):
             self.log_table.setColumnWidth(col_index, 160)
 
     def exportieren(self) -> None:
-        from datetime import datetime
 
         target, _ = QFileDialog.getSaveFileName(
             self,
@@ -10193,206 +11621,327 @@ def enterprise_workflow_vorschlaege(objektordner: str = "") -> list[dict[str, st
     return result
 
 
-def enterprise_aktivitaeten(objektordner: str = "") -> list[list[str]]:
-    """Erzeugt eine kompakte, neueste-zuerst sortierte Aktivitätsliste."""
-    events = objektchronik_rows(objektordner) if objektordner else []
-    if not objektordner:
-        for object_name in alle_objektordner():
-            events.extend(objektchronik_rows(object_name))
-    events.sort(key=lambda item: datum_sort_key(item[0]), reverse=True)
-    return events[:300]
+
 
 
 class EnterpriseObjekt360Seite(QWidget):
-    """360°-Objektcockpit mit Stammdaten, Finanzen, Vorgängen und Timeline."""
+    """Enterprise-Objektansicht mit robustem, vollständig scrollbarerm Layout."""
 
     def __init__(self, nav):
         super().__init__()
         self.nav = nav
-        self.current_object = ""
+        self.current_objekt = ""
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 18)
-        root.setSpacing(14)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(18, 16, 18, 16)
+        outer.setSpacing(12)
 
         title = QLabel("Enterprise Objekt 360°")
         title.setObjectName("pageTitle")
-        root.addWidget(title)
+        outer.addWidget(title)
 
         subtitle = QLabel(
-            "Zentrale 360°-Sicht auf Stammdaten, Vermietung, Finanzen, Dokumente, Schäden, Aufgaben und Chronik."
+            "Zentrale 360°-Ansicht für Stammdaten, Mieter, Finanzen, Aufgaben, Dokumente und Chronik."
         )
         subtitle.setObjectName("subTitle")
         subtitle.setWordWrap(True)
-        root.addWidget(subtitle)
+        outer.addWidget(subtitle)
 
-        top = QHBoxLayout()
-        self.object_combo = QComboBox()
-        self.object_combo.setEditable(True)
-        self.object_combo.setMinimumWidth(330)
-        self.object_combo.addItems(alle_objektordner())
-        self.object_combo.currentTextChanged.connect(self.refresh)
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(10)
 
-        refresh_button = QPushButton("Aktualisieren")
-        refresh_button.setObjectName("primaryButton")
-        refresh_button.clicked.connect(self.refresh)
+        self.objekt_filter = QComboBox()
+        self.objekt_filter.setEditable(True)
+        self.objekt_filter.setMinimumWidth(320)
+        self.objekt_filter.addItems(alle_objektordner())
+        self.objekt_filter.currentTextChanged.connect(self.laden)
 
-        document_button = QPushButton("Dokumenten-Center")
-        document_button.clicked.connect(lambda: self.nav("Dokumenten-Center 2.0"))
+        refresh = QPushButton("Aktualisieren")
+        refresh.setObjectName("primaryButton")
+        refresh.clicked.connect(self.laden)
 
-        workflow_button = QPushButton("Workflow-Regeln")
-        workflow_button.clicked.connect(lambda: self.nav("Workflow-Regeln PRO"))
+        open_chronik = QPushButton("Chronik öffnen")
+        open_chronik.clicked.connect(lambda: self.nav("Objektchronik"))
 
-        top.addWidget(QLabel("Objektordner:"))
-        top.addWidget(self.object_combo, 1)
-        top.addWidget(refresh_button)
-        top.addWidget(document_button)
-        top.addWidget(workflow_button)
-        root.addLayout(top)
+        open_docs = QPushButton("Dokumenten-Center")
+        open_docs.clicked.connect(lambda: self.nav("Dokumenten-Center 2.0"))
+
+        toolbar.addWidget(QLabel("Objektordner:"))
+        toolbar.addWidget(self.objekt_filter, 1)
+        toolbar.addWidget(refresh)
+        toolbar.addWidget(open_chronik)
+        toolbar.addWidget(open_docs)
+        outer.addLayout(toolbar)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        outer.addWidget(self.scroll, 1)
+
+        self.content = QWidget()
+        self.content.setMinimumWidth(980)
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(4, 4, 14, 18)
+        self.content_layout.setSpacing(14)
+        self.scroll.setWidget(self.content)
 
         self.status_panel = QFrame()
         self.status_panel.setObjectName("chartPanel")
+        self.status_panel.setMinimumHeight(115)
         status_layout = QHBoxLayout(self.status_panel)
-        self.status_icon = QLabel("⚪")
-        self.status_icon.setStyleSheet("font-size:48px;")
-        self.status_text = QLabel("Kein Objekt ausgewählt")
-        self.status_text.setObjectName("metricValue")
-        self.status_note = QLabel("")
-        self.status_note.setWordWrap(True)
+        status_layout.setContentsMargins(18, 14, 18, 14)
+        status_layout.setSpacing(14)
 
-        text_layout = QVBoxLayout()
-        text_layout.addWidget(self.status_text)
-        text_layout.addWidget(self.status_note)
-        status_layout.addWidget(self.status_icon)
-        status_layout.addLayout(text_layout, 1)
-        root.addWidget(self.status_panel)
+        self.ampel = QLabel("⚪")
+        self.ampel.setStyleSheet("font-size:46px;")
+        self.ampel.setMinimumWidth(72)
 
-        self.cards = QGridLayout()
-        self.cards.setSpacing(12)
-        root.addLayout(self.cards)
+        status_text = QVBoxLayout()
+        self.status_title = QLabel("Kein Objekt ausgewählt")
+        self.status_title.setObjectName("metricValue")
+        self.status_title.setWordWrap(True)
+
+        self.status_info = QLabel("")
+        self.status_info.setWordWrap(True)
+        self.status_info.setMinimumHeight(42)
+
+        status_text.addWidget(self.status_title)
+        status_text.addWidget(self.status_info)
+
+        status_layout.addWidget(self.ampel, 0, Qt.AlignmentFlag.AlignTop)
+        status_layout.addLayout(status_text, 1)
+        self.content_layout.addWidget(self.status_panel)
+
+        self.cards_widget = QWidget()
+        self.cards_grid = QGridLayout(self.cards_widget)
+        self.cards_grid.setContentsMargins(0, 0, 0, 0)
+        self.cards_grid.setHorizontalSpacing(12)
+        self.cards_grid.setVerticalSpacing(12)
+        self.content_layout.addWidget(self.cards_widget)
 
         self.tabs = QTabWidget()
-        root.addWidget(self.tabs, 1)
+        self.tabs.setMinimumHeight(500)
+        self.tabs.setDocumentMode(True)
+        self.content_layout.addWidget(self.tabs, 1)
 
-        self.tables: dict[str, QTableWidget] = {}
-        for label, table_name in [
-            ("Stammdaten", "Objekte"),
-            ("Wohnungen", "Wohnungen"),
-            ("Mieter", "Mieter"),
-            ("Rechnungen", "Rechnungen"),
-            ("Betriebskosten", "Betriebskosten"),
-            ("Aufgaben", "Aufgaben"),
-            ("Schäden", "Schäden"),
-            ("Dokumente", "Dokumente"),
+        self.tables = {}
+        for title_name in [
+            "Stammdaten",
+            "Wohnungen",
+            "Mieter",
+            "Finanzen",
+            "Aufgaben & Schäden",
+            "Dokumente",
+            "Chronik",
         ]:
             table = QTableWidget()
             table.setAlternatingRowColors(True)
             table.setWordWrap(False)
             table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-            table.cellDoubleClicked.connect(
-                lambda _row, _column, target=table_name: self.nav(target)
-            )
-            self.tables[table_name] = table
-            self.tabs.addTab(table, label)
+            table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+            table.setMinimumHeight(410)
+            table.horizontalHeader().setStretchLastSection(False)
+            self.tables[title_name] = table
+            self.tabs.addTab(table, title_name)
 
-        self.timeline_table = QTableWidget()
-        self.timeline_table.setColumnCount(5)
-        self.timeline_table.setHorizontalHeaderLabels(
-            ["Datum", "Bereich", "Ereignis", "Status", "Objektordner"]
-        )
-        self.timeline_table.setAlternatingRowColors(True)
-        self.timeline_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.timeline_table.cellDoubleClicked.connect(self.open_timeline_area)
-        self.tabs.addTab(self.timeline_table, "Timeline")
-
-        self.refresh()
+        self.laden()
 
     @staticmethod
-    def _card(title: str, value: str, icon: str) -> QFrame:
+    def _metric_card(title: str, value: str, icon: str) -> QFrame:
         card = QFrame()
         card.setObjectName("metricCard")
-        card.setMinimumHeight(92)
+        card.setMinimumWidth(210)
+        card.setMaximumWidth(360)
+        card.setMinimumHeight(110)
+
         layout = QVBoxLayout(card)
-        label = QLabel(f"{icon}  {title}")
-        label.setObjectName("metricTitle")
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(6)
+
+        title_label = QLabel(f"{icon}  {title}")
+        title_label.setObjectName("metricTitle")
+        title_label.setWordWrap(True)
+
         value_label = QLabel(value)
         value_label.setObjectName("metricValue")
         value_label.setWordWrap(True)
-        layout.addWidget(label)
+
+        layout.addWidget(title_label)
         layout.addWidget(value_label)
         return card
 
-    def refresh(self) -> None:
-        object_name = self.object_combo.currentText().strip()
-        self.current_object = object_name
-        if not object_name:
-            return
-
-        status = smart_objekt_status(object_name)
-        health = objekt_gesundheitsindex(object_name)
-
-        self.status_icon.setText(str(health["ampel"]))
-        self.status_text.setText(
-            f'{object_name} · {health["punkte"]} % · {health["bewertung"]}'
-        )
-        messages = list(status.get("hinweise", []))
-        messages.extend(health.get("gruende", []))
-        self.status_note.setText(" · ".join(messages) if messages else "Keine kritischen Auffälligkeiten.")
-
-        while self.cards.count():
-            item = self.cards.takeAt(0)
-            if item is not None and item.widget() is not None:
-                item.widget().deleteLater()
-
-        card_values = [
-            ("Wohnungen", str(status["wohnungen"]), "🏠"),
-            ("Mieter", str(status["mieter"]), "👥"),
-            ("Leerstand", str(status["freie_wohnungen"]), "🚪"),
-            ("Offene Aufgaben", str(status["offene_aufgaben"]), "🗂"),
-            ("Offene Rechnungen", str(status["offene_rechnungen"]), "🧾"),
-            ("Offene Schäden", str(status["offene_schaeden"]), "⚠"),
-            ("Dokumente", str(status["dokumente"]), "📄"),
-            ("Jahresmiete", euro(float(status["jahresmiete"])), "💶"),
-            ("Objektsaldo", euro(float(status["saldo"])), "Σ"),
-        ]
-        for index, values in enumerate(card_values):
-            self.cards.addWidget(self._card(*values), index // 3, index % 3)
-
-        for table_name, table in self.tables.items():
-            self._fill_table(table, table_name, object_name)
-
-        timeline = objektchronik_rows(object_name)
-        self.timeline_table.setRowCount(len(timeline))
-        for row_index, row in enumerate(timeline):
-            for col_index, value in enumerate(row):
-                self.timeline_table.setItem(
-                    row_index, col_index, QTableWidgetItem(str(value))
-                )
-        for col_index, width in enumerate([120, 190, 650, 150, 260]):
-            self.timeline_table.setColumnWidth(col_index, width)
-
     @staticmethod
-    def _fill_table(table: QTableWidget, title: str, object_name: str) -> None:
-        rows = [
-            row for row in DATA.get(title, [])
-            if norm_key(objektordner_fuer_datensatz(title, row)) == norm_key(object_name)
-        ]
-        headers = SCHEMA.get(title, [])
+    def _fill_table(table: QTableWidget, headers: list[str], rows: list[list[object]]) -> None:
+        table.clear()
         table.setColumnCount(len(headers))
         table.setHorizontalHeaderLabels(headers)
         table.setRowCount(len(rows))
+
         for row_index, row in enumerate(rows):
             for col_index in range(len(headers)):
                 value = row[col_index] if col_index < len(row) else ""
-                table.setItem(row_index, col_index, QTableWidgetItem(str(value)))
+                table.setItem(
+                    row_index,
+                    col_index,
+                    QTableWidgetItem("" if value is None else str(value)),
+                )
+
         for col_index in range(len(headers)):
-            table.setColumnWidth(col_index, 155)
+            width = 180
+            if col_index == 0:
+                width = 220
+            table.setColumnWidth(col_index, width)
 
-    def open_timeline_area(self, row: int, _column: int) -> None:
-        item = self.timeline_table.item(row, 1)
-        if item is not None and item.text().strip():
-            self.nav(item.text().strip())
+    def laden(self) -> None:
+        objekt = self.objekt_filter.currentText().strip()
+        self.current_objekt = objekt
 
+        if not objekt:
+            self.ampel.setText("⚪")
+            self.status_title.setText("Kein Objekt ausgewählt")
+            self.status_info.setText("")
+            return
+
+        status = smart_objekt_status(objekt)
+        health = objekt_gesundheitsindex(objekt)
+
+        self.ampel.setText(str(health.get("ampel", "⚪")))
+        self.status_title.setText(
+            f"{objekt} · {health.get('punkte', 0)} % · {health.get('bewertung', '')}"
+        )
+        hinweise = status.get("hinweise", [])
+        self.status_info.setText(
+            " · ".join(str(item) for item in hinweise)
+            if hinweise
+            else "Keine kritischen Hinweise."
+        )
+
+        while self.cards_grid.count():
+            item = self.cards_grid.takeAt(0)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        cards = [
+            ("Wohnungen", str(status.get("wohnungen", 0)), "🏠"),
+            ("Mieter", str(status.get("mieter", 0)), "👥"),
+            ("Leerstand", str(status.get("freie_wohnungen", 0)), "🚪"),
+            ("Offene Aufgaben", str(status.get("offene_aufgaben", 0)), "🗂"),
+            ("Überfällig", str(status.get("ueberfaellige_aufgaben", 0)), "⏰"),
+            ("Offene Rechnungen", str(status.get("offene_rechnungen", 0)), "🧾"),
+            ("Offene Schäden", str(status.get("offene_schaeden", 0)), "⚠"),
+            ("Dokumente", str(status.get("dokumente", 0)), "📄"),
+            ("Monatsmiete", euro(float(status.get("monatsmiete", 0.0))), "💶"),
+            ("Jahresmiete", euro(float(status.get("jahresmiete", 0.0))), "📈"),
+            ("Ausgaben", euro(float(status.get("ausgaben", 0.0))), "💸"),
+            ("Saldo", euro(float(status.get("saldo", 0.0))), "Σ"),
+        ]
+
+        # 3 Spalten verhindern Überlagerungen auf kleineren Bildschirmen.
+        for index, card in enumerate(cards):
+            self.cards_grid.addWidget(
+                self._metric_card(*card),
+                index // 3,
+                index % 3,
+            )
+
+        # Stammdaten
+        object_rows = [
+            row for row in DATA.get("Objekte", [])
+            if norm_key(objektordner_fuer_datensatz("Objekte", row)) == norm_key(objekt)
+            or norm_key(feldwert("Objekte", row, ["Objektname", "Objekt"])) == norm_key(objekt)
+        ]
+        self._fill_table(
+            self.tables["Stammdaten"],
+            SCHEMA.get("Objekte", []),
+            object_rows,
+        )
+
+        # Wohnungen
+        wohnungen = [
+            row for row in DATA.get("Wohnungen", [])
+            if norm_key(objektordner_fuer_datensatz("Wohnungen", row)) == norm_key(objekt)
+        ]
+        self._fill_table(
+            self.tables["Wohnungen"],
+            SCHEMA.get("Wohnungen", []),
+            wohnungen,
+        )
+
+        # Mieter
+        mieter = [
+            row for row in DATA.get("Mieter", [])
+            if norm_key(objektordner_fuer_datensatz("Mieter", row)) == norm_key(objekt)
+        ]
+        self._fill_table(
+            self.tables["Mieter"],
+            SCHEMA.get("Mieter", []),
+            mieter,
+        )
+
+        # Finanzen als vereinheitlichte Übersicht
+        finance_rows = []
+        for title_name in ["Rechnungen", "Betriebskosten", "Zahlungen", "HV-Rechnungen"]:
+            for row in DATA.get(title_name, []):
+                if norm_key(objektordner_fuer_datensatz(title_name, row)) == norm_key(objekt):
+                    finance_rows.append([
+                        title_name,
+                        *[row[i] if i < len(row) else "" for i in range(min(8, len(row)))],
+                    ])
+        finance_headers = ["Bereich"] + [f"Feld {i}" for i in range(1, 9)]
+        self._fill_table(self.tables["Finanzen"], finance_headers, finance_rows)
+
+        # Aufgaben und Schäden
+        task_rows = []
+        for title_name in ["Aufgaben", "Schäden", "Fristen"]:
+            for row in DATA.get(title_name, []):
+                if norm_key(objektordner_fuer_datensatz(title_name, row)) == norm_key(objekt):
+                    task_rows.append([
+                        title_name,
+                        *[row[i] if i < len(row) else "" for i in range(min(8, len(row)))],
+                    ])
+        task_headers = ["Bereich"] + [f"Feld {i}" for i in range(1, 9)]
+        self._fill_table(self.tables["Aufgaben & Schäden"], task_headers, task_rows)
+
+        # Dokumente
+        document_rows = []
+        for title_name, rows in DATA.items():
+            headers = SCHEMA.get(title_name, [])
+            pdf_indexes = [
+                index for index, field in enumerate(headers)
+                if any(token in norm_key(field) for token in ["pdf", "datei", "dokument", "pfad"])
+            ]
+            if not pdf_indexes:
+                continue
+
+            for row in rows:
+                if norm_key(objektordner_fuer_datensatz(title_name, row)) != norm_key(objekt):
+                    continue
+                for pdf_index in pdf_indexes:
+                    if pdf_index < len(row) and str(row[pdf_index] or "").strip():
+                        document_rows.append([
+                            title_name,
+                            headers[pdf_index],
+                            str(row[pdf_index]),
+                        ])
+
+        self._fill_table(
+            self.tables["Dokumente"],
+            ["Bereich", "Feld", "Datei/Pfad"],
+            document_rows,
+        )
+
+        # Chronik
+        chronik = objektchronik_rows(objekt)
+        self._fill_table(
+            self.tables["Chronik"],
+            ["Datum", "Bereich", "Ereignis", "Status", "Objektordner"],
+            chronik,
+        )
 
 class DokumentenCenter2Seite(QWidget):
     """Dokumentenindex über alle bestehenden Tabellen und PDF-Felder."""
@@ -10669,6 +12218,3374 @@ class WorkflowRegelnProSeite(QWidget):
                 self.nav(target)
 
 
+
+SEARCH_INDEX_FILE = DATEN_DIR / "enterprise_search_index.json"
+
+
+def enterprise_search_index_bauen(force: bool = False) -> list[dict[str, str]]:
+    """Erzeugt einen lokalen Volltextindex ohne Änderung der Exceldateien."""
+    if not force and SEARCH_INDEX_FILE.exists():
+        try:
+            cached = json.loads(SEARCH_INDEX_FILE.read_text(encoding="utf-8"))
+            if isinstance(cached, list):
+                return cached
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+
+    index: list[dict[str, str]] = []
+    for titel, rows in DATA.items():
+        headers = SCHEMA.get(titel, [])
+        for row_number, row in enumerate(rows, start=1):
+            values = ["" if value is None else str(value) for value in row]
+            objekt = objektordner_fuer_datensatz(titel, row)
+            index.append({
+                "bereich": titel,
+                "zeile": str(row_number),
+                "objekt": objekt,
+                "titel": values[0] if values else titel,
+                "text": " | ".join(values),
+                "suchtext": " ".join(values).lower(),
+                "felder": " | ".join(headers),
+            })
+
+    try:
+        DATEN_DIR.mkdir(parents=True, exist_ok=True)
+        SEARCH_INDEX_FILE.write_text(
+            json.dumps(index, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except (OSError, PermissionError, TypeError):
+        pass
+    return index
+
+
+def enterprise_search(query: str, objekt: str = "") -> list[dict[str, str]]:
+    words = [word for word in str(query or "").lower().split() if word]
+    objekt_key = norm_key(objekt)
+    if not words and not objekt_key:
+        return []
+
+    results: list[dict[str, str]] = []
+    for item in enterprise_search_index_bauen():
+        if objekt_key and norm_key(item.get("objekt", "")) != objekt_key:
+            continue
+        haystack = item.get("suchtext", "")
+        if words and not all(word in haystack for word in words):
+            continue
+        results.append(item)
+    return results[:500]
+
+
+def projektmonitor_daten() -> list[dict[str, str]]:
+    checks: list[dict[str, str]] = []
+    total = 0
+    passed = 0
+
+    for titel in SCHEMA:
+        total += 1
+        path = xlsx_pfad(titel)
+        ok = path.exists()
+        passed += int(ok)
+        checks.append({
+            "status": "🟢" if ok else "🔴",
+            "bereich": "Excel",
+            "element": titel,
+            "ergebnis": "Vorhanden" if ok else "Fehlt",
+            "details": str(path),
+        })
+
+    total += 1
+    invalid = len(objektordner_pruefbericht())
+    ok = invalid == 0
+    passed += int(ok)
+    checks.append({
+        "status": "🟢" if ok else "🟡",
+        "bereich": "Objektordner",
+        "element": "Zuordnungen",
+        "ergebnis": f"{invalid} Datensätze prüfen",
+        "details": "Objektordner-Prüfung öffnen",
+    })
+
+    total += 1
+    documents = dokumenten_index_rows()
+    missing = sum(1 for item in documents if item.get("status") != "Vorhanden")
+    ok = missing == 0
+    passed += int(ok)
+    checks.append({
+        "status": "🟢" if ok else "🟡",
+        "bereich": "Dokumente",
+        "element": "Dateipfade",
+        "ergebnis": f"{missing} fehlende Datei(en)",
+        "details": f"{len(documents)} indexierte Dokumente",
+    })
+
+    total += 1
+    backup_files = list(BACKUP_DIR.glob("*.zip")) if BACKUP_DIR.exists() else []
+    ok = bool(backup_files)
+    passed += int(ok)
+    checks.append({
+        "status": "🟢" if ok else "🟡",
+        "bereich": "Backup",
+        "element": "Sicherungen",
+        "ergebnis": f"{len(backup_files)} Backup(s)",
+        "details": str(BACKUP_DIR),
+    })
+
+    score = round((passed / total) * 100) if total else 100
+    checks.insert(0, {
+        "status": "🟢" if score >= 90 else "🟡" if score >= 70 else "🔴",
+        "bereich": "Gesamtzustand",
+        "element": "Projektmonitor",
+        "ergebnis": f"{score} %",
+        "details": f"{passed} von {total} Prüfungen bestanden",
+    })
+    return checks
+
+
+class EnterpriseAssistentSeite(QWidget):
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.rows: list[dict[str, str]] = []
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
+
+        title = QLabel("Enterprise Assistant")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+        info = QLabel("Lokale intelligente Suche über alle Tabellen und Objektordner. Keine Datenübertragung nach außen.")
+        info.setObjectName("subTitle")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        top = QHBoxLayout()
+        self.objekt = QComboBox()
+        self.objekt.addItem("Alle Objektordner")
+        self.objekt.addItems(alle_objektordner())
+        self.query = QLineEdit()
+        self.query.setPlaceholderText("z. B. Müller, offene Rechnung, Heizung Musterstraße ...")
+        self.query.returnPressed.connect(self.suchen)
+        search = QPushButton("Suchen")
+        search.setObjectName("primaryButton")
+        search.clicked.connect(self.suchen)
+        rebuild = QPushButton("Index neu aufbauen")
+        rebuild.clicked.connect(self.index_neu)
+        top.addWidget(QLabel("Objektordner:"))
+        top.addWidget(self.objekt)
+        top.addWidget(self.query, 1)
+        top.addWidget(search)
+        top.addWidget(rebuild)
+        layout.addLayout(top)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["Bereich", "Zeile", "Objektordner", "Titel", "Felder", "Inhalt"])
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.table.cellDoubleClicked.connect(self.oeffnen)
+        layout.addWidget(self.table, 1)
+
+    def index_neu(self) -> None:
+        enterprise_search_index_bauen(True)
+        QMessageBox.information(self, "Suchindex", "Der lokale Suchindex wurde neu aufgebaut.")
+        self.suchen()
+
+    def suchen(self) -> None:
+        selected = self.objekt.currentText().strip()
+        objekt = "" if selected == "Alle Objektordner" else selected
+        self.rows = enterprise_search(self.query.text(), objekt)
+        self.table.setRowCount(len(self.rows))
+        keys = ["bereich", "zeile", "objekt", "titel", "felder", "text"]
+        for r, item in enumerate(self.rows):
+            for c, key in enumerate(keys):
+                self.table.setItem(r, c, QTableWidgetItem(item.get(key, "")))
+        for c, width in enumerate([190, 70, 230, 260, 360, 760]):
+            self.table.setColumnWidth(c, width)
+
+    def oeffnen(self, row: int, _column: int) -> None:
+        if 0 <= row < len(self.rows):
+            self.nav(self.rows[row].get("bereich", "Dashboard"))
+
+
+class ProjektmonitorSeite(QWidget):
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(14)
+        title = QLabel("Projektmonitor")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+        info = QLabel("Überwacht Exceldateien, Objektordner, Dokumentpfade, Backups und den Gesamtzustand des Projekts.")
+        info.setObjectName("subTitle")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+        top = QHBoxLayout()
+        refresh = QPushButton("Projekt prüfen")
+        refresh.setObjectName("primaryButton")
+        refresh.clicked.connect(self.laden)
+        system = QPushButton("System-Center öffnen")
+        system.clicked.connect(lambda: self.nav("System-Center PRO"))
+        object_check = QPushButton("Objektordner-Prüfung")
+        object_check.clicked.connect(lambda: self.nav("Objektordner-Prüfung"))
+        top.addWidget(refresh)
+        top.addWidget(system)
+        top.addWidget(object_check)
+        top.addStretch()
+        layout.addLayout(top)
+        self.score = QLabel("")
+        self.score.setObjectName("metricValue")
+        layout.addWidget(self.score)
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Status", "Bereich", "Element", "Ergebnis", "Details"])
+        self.table.setAlternatingRowColors(True)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        layout.addWidget(self.table, 1)
+        self.laden()
+
+    def laden(self) -> None:
+        rows = projektmonitor_daten()
+        self.score.setText(f"Projektzustand: {rows[0]['ergebnis'] if rows else '–'}")
+        self.table.setRowCount(len(rows))
+        keys = ["status", "bereich", "element", "ergebnis", "details"]
+        for r, item in enumerate(rows):
+            for c, key in enumerate(keys):
+                self.table.setItem(r, c, QTableWidgetItem(item.get(key, "")))
+        for c, width in enumerate([80, 180, 260, 190, 620]):
+            self.table.setColumnWidth(c, width)
+
+
+class DokumentVorschauSeite(QWidget):
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.rows: list[dict[str, str]] = []
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+        title = QLabel("Dokumentenvorschau")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+        split = QSplitter(Qt.Orientation.Horizontal)
+        layout.addWidget(split, 1)
+
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Dokument suchen ...")
+        self.search.textChanged.connect(self.laden)
+        left_layout.addWidget(self.search)
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["Bereich", "Objektordner", "Titel", "Datei"])
+        self.table.setAlternatingRowColors(True)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.table.cellClicked.connect(self.vorschau)
+        self.table.cellDoubleClicked.connect(self.extern_oeffnen)
+        left_layout.addWidget(self.table, 1)
+        split.addWidget(left)
+
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        self.preview_title = QLabel("Dokument auswählen")
+        self.preview_title.setObjectName("metricTitle")
+        right_layout.addWidget(self.preview_title)
+        self.preview = QTextBrowser()
+        self.preview.setOpenExternalLinks(False)
+        right_layout.addWidget(self.preview, 1)
+        self.open_button = QPushButton("Extern öffnen")
+        self.open_button.setObjectName("primaryButton")
+        self.open_button.clicked.connect(self.extern_oeffnen_current)
+        right_layout.addWidget(self.open_button)
+        split.addWidget(right)
+        split.setSizes([700, 700])
+        self.laden()
+
+    def laden(self) -> None:
+        query = self.search.text().lower().strip()
+        rows = dokumenten_index_rows()
+        self.rows = [item for item in rows if not query or query in " ".join(item.values()).lower()]
+        self.table.setRowCount(len(self.rows))
+        for r, item in enumerate(self.rows):
+            values = [item.get("bereich", ""), item.get("objekt", ""), item.get("titel", ""), item.get("pfad", "")]
+            for c, value in enumerate(values):
+                self.table.setItem(r, c, QTableWidgetItem(value))
+        for c, width in enumerate([180, 230, 250, 520]):
+            self.table.setColumnWidth(c, width)
+
+    def _path(self, row: int) -> Path | None:
+        if not (0 <= row < len(self.rows)):
+            return None
+        raw = self.rows[row].get("pfad", "")
+        path = Path(raw)
+        if not path.is_absolute():
+            candidates = [APP_DIR / path, DOKUMENTE_DIR / path, path]
+            path = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+        return path
+
+    def vorschau(self, row: int, _column: int) -> None:
+        path = self._path(row)
+        if path is None:
+            return
+        self.preview_title.setText(path.name)
+        if not path.exists():
+            self.preview.setPlainText(f"Datei nicht gefunden:\n{path}")
+            return
+        suffix = path.suffix.lower()
+        if suffix in {".png", ".jpg", ".jpeg", ".webp", ".bmp"}:
+            self.preview.setHtml(f'<div style="text-align:center"><img src="{path.as_uri()}" style="max-width:95%; max-height:700px"></div>')
+        elif suffix == ".pdf" and PdfReader is not None:
+            try:
+                reader = PdfReader(str(path))
+                content = "\n\n".join((page.extract_text() or "") for page in reader.pages[:20])
+                self.preview.setPlainText(content or "Das PDF enthält keinen direkt lesbaren Text.")
+            except (OSError, ValueError, TypeError) as error:
+                self.preview.setPlainText(f"PDF-Vorschau nicht möglich:\n{error}")
+        elif suffix in {".txt", ".md", ".csv", ".json"}:
+            try:
+                self.preview.setPlainText(path.read_text(encoding="utf-8", errors="replace")[:200000])
+            except OSError as error:
+                self.preview.setPlainText(str(error))
+        else:
+            self.preview.setPlainText(f"Für {suffix or 'diesen Dateityp'} ist keine interne Vorschau verfügbar.\n\n{path}")
+
+    def extern_oeffnen(self, row: int, _column: int) -> None:
+        path = self._path(row)
+        if path is not None and path.exists():
+            system_datei_oeffnen(path)
+
+    def extern_oeffnen_current(self) -> None:
+        self.extern_oeffnen(self.table.currentRow(), 0)
+
+
+
+def objektbilder_ordner(objektordner: str) -> Path:
+    """Liefert einen sicheren, objektbezogenen Ablageordner für Gebäudebilder."""
+    safe_name = re.sub(r"[^0-9A-Za-zÄÖÜäöüß._ -]+", "_", str(objektordner).strip())
+    safe_name = safe_name.strip(" .") or "Objekt"
+    return DOKUMENTE_DIR / "objektbilder" / safe_name
+
+
+def gebaeudezwilling_fotos(objektordner: str) -> list[Path]:
+    """Ermittelt hochgeladene und bereits indexierte Objektbilder."""
+    objekt_key = norm_key(objektordner)
+    image_suffixes = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+    result: list[Path] = []
+    seen: set[str] = set()
+
+    upload_dir = objektbilder_ordner(objektordner)
+    if upload_dir.exists():
+        for path in sorted(upload_dir.iterdir(), key=lambda item: item.name.lower()):
+            path_key = str(path.resolve())
+            if path.is_file() and path.suffix.lower() in image_suffixes and path_key not in seen:
+                seen.add(path_key)
+                result.append(path)
+
+    for item in dokumenten_index_rows():
+        if norm_key(item.get("objekt", "")) != objekt_key:
+            continue
+
+        path = Path(item.get("pfad", ""))
+        try:
+            path_key = str(path.resolve())
+        except OSError:
+            path_key = str(path)
+
+        if (
+            item.get("status") == "Vorhanden"
+            and path.suffix.lower() in image_suffixes
+            and path_key not in seen
+        ):
+            seen.add(path_key)
+            result.append(path)
+
+    return result[:40]
+
+
+def gebaeudezwilling_einheiten(objektordner: str) -> list[dict[str, str]]:
+    """Bereitet Wohnungen und zugehörige Mieter für die visuelle Ansicht auf.
+
+    Zuordnungsreihenfolge:
+    1. gleicher Wohnungsordner,
+    2. gleicher Objektordner und gleiche Wohnfläche.
+
+    Die im Gebäudezwilling angezeigte Fläche stammt immer aus der Tabelle
+    ``Mieter`` aus der Spalte ``Wohnfläche``. Ein Mieterdatensatz wird dabei
+    höchstens einer Wohnung zugeordnet.
+    """
+    objekt_key = norm_key(objektordner)
+    result: list[dict[str, str]] = []
+
+    tenants = [
+        row for row in DATA.get("Mieter", [])
+        if norm_key(objektordner_fuer_datensatz("Mieter", row)) == objekt_key
+    ]
+    verwendete_mieter: set[int] = set()
+
+    def flaechenwert(value: Any) -> float | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        number = to_float(text, default=float("nan"))
+        return number if number == number else None
+
+    for apartment in DATA.get("Wohnungen", []):
+        if norm_key(objektordner_fuer_datensatz("Wohnungen", apartment)) != objekt_key:
+            continue
+
+        apartment_name = feldwert(
+            "Wohnungen",
+            apartment,
+            ["Wohnung", "Wohnungsordner", "Bezeichnung", "Nummer"],
+        )
+        apartment_folder = feldwert("Wohnungen", apartment, ["Wohnungsordner"])
+        apartment_area = flaechenwert(
+            feldwert("Wohnungen", apartment, ["Größe qm", "Wohnfläche", "Fläche"])
+        )
+        status = feldwert("Wohnungen", apartment, ["Status"])
+
+        tenant_index: int | None = None
+
+        # 1. Bevorzugt über einen ausdrücklich gepflegten Wohnungsordner verbinden.
+        apartment_folder_key = norm_key(apartment_folder)
+        if apartment_folder_key:
+            for index, tenant in enumerate(tenants):
+                if index in verwendete_mieter:
+                    continue
+                tenant_folder = feldwert("Mieter", tenant, ["Wohnungsordner"])
+                if norm_key(tenant_folder) == apartment_folder_key:
+                    tenant_index = index
+                    break
+
+        # 2. Fallback für bestehende Daten: Objektordner + identische Wohnfläche.
+        if tenant_index is None and apartment_area is not None:
+            for index, tenant in enumerate(tenants):
+                if index in verwendete_mieter:
+                    continue
+                tenant_area = flaechenwert(feldwert("Mieter", tenant, ["Wohnfläche"]))
+                if tenant_area is not None and abs(tenant_area - apartment_area) < 0.01:
+                    tenant_index = index
+                    break
+
+        tenant_name = ""
+        tenant_status = ""
+        area = ""
+
+        if tenant_index is not None:
+            verwendete_mieter.add(tenant_index)
+            tenant = tenants[tenant_index]
+            tenant_name = feldwert("Mieter", tenant, ["Mieter", "Name"])
+            tenant_status = feldwert("Mieter", tenant, ["Mieter-Status", "Status"])
+            # Gewünscht: Fläche ausschließlich aus Mieter.xlsx / Wohnfläche.
+            area = feldwert("Mieter", tenant, ["Wohnfläche"])
+
+        combined_status = status or tenant_status
+        status_key = norm_key(combined_status)
+
+        if any(word in status_key for word in ["frei", "leer", "unvermietet"]):
+            ampel = "🟡"
+            display_status = combined_status or "Frei"
+        elif tenant_name:
+            ampel = "🟢"
+            display_status = combined_status or "Vermietet"
+        else:
+            ampel = "⚪"
+            display_status = combined_status or "Nicht zugeordnet"
+
+        result.append({
+            "wohnung": apartment_name or "Einheit",
+            "mieter": tenant_name or "Kein Mieter zugeordnet",
+            "status": display_status,
+            "ampel": ampel,
+            "flaeche": area,
+        })
+
+    return result
+
+
+def gebaeudezwilling_letzte_ereignisse(
+    objektordner: str,
+    limit: int = 12,
+) -> list[list[str]]:
+    rows = objektchronik_rows(objektordner)
+    rows.sort(key=lambda row: datum_sort_key(row[0]), reverse=True)
+    return rows[:limit]
+
+
+class DigitalerGebaeudezwillingSeite(QWidget):
+    """Visuelle Objektübersicht als digitaler Gebäudezwilling."""
+
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.current_objekt = ""
+        self.photo_paths: list[Path] = []
+        self.photo_index = 0
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(18, 16, 18, 16)
+        outer.setSpacing(12)
+
+        title = QLabel("Digitaler Gebäudezwilling")
+        title.setObjectName("pageTitle")
+        outer.addWidget(title)
+
+        subtitle = QLabel(
+            "Visuelle Objektakte mit Gebäudebild, Einheiten, Zustand, "
+            "Finanzen, Aufgaben und letzten Ereignissen."
+        )
+        subtitle.setObjectName("subTitle")
+        subtitle.setWordWrap(True)
+        outer.addWidget(subtitle)
+
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(10)
+
+        self.objekt_filter = QComboBox()
+        self.objekt_filter.setEditable(True)
+        self.objekt_filter.setMinimumWidth(320)
+        self.objekt_filter.addItems(alle_objektordner())
+        self.objekt_filter.currentTextChanged.connect(self.laden)
+
+        refresh = QPushButton("Aktualisieren")
+        refresh.setObjectName("primaryButton")
+        refresh.clicked.connect(self.laden)
+
+        open_360 = QPushButton("Objekt 360°")
+        open_360.clicked.connect(lambda: self.nav("Enterprise Objekt 360°"))
+
+        open_docs = QPushButton("Dokumente")
+        open_docs.clicked.connect(lambda: self.nav("Dokumenten-Center 2.0"))
+
+        open_tasks = QPushButton("Aufgaben")
+        open_tasks.clicked.connect(lambda: self.nav("Arbeitsorganisation PRO"))
+
+        toolbar.addWidget(QLabel("Objektordner:"))
+        toolbar.addWidget(self.objekt_filter, 1)
+        toolbar.addWidget(refresh)
+        toolbar.addWidget(open_360)
+        toolbar.addWidget(open_docs)
+        toolbar.addWidget(open_tasks)
+        outer.addLayout(toolbar)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        outer.addWidget(scroll, 1)
+
+        content = QWidget()
+        content.setMinimumWidth(1080)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(4, 4, 14, 18)
+        layout.setSpacing(14)
+        scroll.setWidget(content)
+
+        hero = QFrame()
+        hero.setObjectName("chartPanel")
+        hero_layout = QHBoxLayout(hero)
+        hero_layout.setContentsMargins(18, 16, 18, 16)
+        hero_layout.setSpacing(18)
+
+        photo_panel = QFrame()
+        photo_panel.setObjectName("metricCard")
+        photo_layout = QVBoxLayout(photo_panel)
+        photo_layout.setContentsMargins(10, 10, 10, 10)
+
+        self.photo = QLabel("Kein Objektfoto vorhanden")
+        self.photo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.photo.setMinimumSize(390, 260)
+        self.photo.setMaximumHeight(340)
+        self.photo.setStyleSheet(
+            "border:1px solid #dce5f0; border-radius:12px; "
+            "background:#f5f8fc; color:#64748b;"
+        )
+        photo_layout.addWidget(self.photo, 1)
+
+        photo_controls = QHBoxLayout()
+        previous_photo = QPushButton("‹")
+        previous_photo.setMaximumWidth(45)
+        previous_photo.clicked.connect(self.vorheriges_foto)
+
+        self.photo_counter = QLabel("0 / 0")
+        self.photo_counter.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        next_photo = QPushButton("›")
+        next_photo.setMaximumWidth(45)
+        next_photo.clicked.connect(self.naechstes_foto)
+
+        upload_photo = QPushButton("Objektbilder hochladen")
+        upload_photo.clicked.connect(self.objektbilder_hochladen)
+
+        open_photo = QPushButton("Foto öffnen")
+        open_photo.clicked.connect(self.foto_oeffnen)
+
+        photo_controls.addWidget(previous_photo)
+        photo_controls.addWidget(self.photo_counter, 1)
+        photo_controls.addWidget(next_photo)
+        photo_controls.addWidget(upload_photo)
+        photo_controls.addWidget(open_photo)
+        photo_layout.addLayout(photo_controls)
+
+        hero_layout.addWidget(photo_panel, 0)
+
+        overview_panel = QFrame()
+        overview_panel.setObjectName("metricCard")
+        overview_layout = QVBoxLayout(overview_panel)
+        overview_layout.setContentsMargins(18, 16, 18, 16)
+        overview_layout.setSpacing(9)
+
+        self.object_name = QLabel("Kein Objekt ausgewählt")
+        self.object_name.setObjectName("metricValue")
+        self.object_name.setWordWrap(True)
+        overview_layout.addWidget(self.object_name)
+
+        self.health_text = QLabel("")
+        self.health_text.setObjectName("metricTitle")
+        overview_layout.addWidget(self.health_text)
+
+        self.health_bar = QProgressBar()
+        self.health_bar.setRange(0, 100)
+        self.health_bar.setMinimumHeight(26)
+        self.health_bar.setFormat("Gesundheitsindex: %p %")
+        overview_layout.addWidget(self.health_bar)
+
+        self.object_details = QLabel("")
+        self.object_details.setWordWrap(True)
+        self.object_details.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        overview_layout.addWidget(self.object_details, 1)
+
+        hero_actions = QGridLayout()
+        actions = [
+            ("Chronik", "Objektchronik"),
+            ("Fristen", "Fristenmanager PRO"),
+            ("Rechnungen", "Rechnungen"),
+            ("Schäden", "Schäden"),
+            ("Mieter", "Mieter"),
+            ("Kalender", "Kalender & Planung"),
+        ]
+        for index, (label, target) in enumerate(actions):
+            button = QPushButton(label)
+            button.clicked.connect(
+                lambda checked=False, page=target: self.nav(page)
+            )
+            hero_actions.addWidget(button, index // 3, index % 3)
+        overview_layout.addLayout(hero_actions)
+
+        hero_layout.addWidget(overview_panel, 1)
+        layout.addWidget(hero)
+
+        self.cards_widget = QWidget()
+        self.cards_grid = QGridLayout(self.cards_widget)
+        self.cards_grid.setContentsMargins(0, 0, 0, 0)
+        self.cards_grid.setHorizontalSpacing(12)
+        self.cards_grid.setVerticalSpacing(12)
+        layout.addWidget(self.cards_widget)
+
+        lower_splitter = QSplitter(Qt.Orientation.Horizontal)
+        lower_splitter.setChildrenCollapsible(False)
+        layout.addWidget(lower_splitter, 1)
+
+        unit_panel = QGroupBox("Einheiten im Gebäude")
+        unit_layout = QVBoxLayout(unit_panel)
+
+        self.unit_grid_widget = QWidget()
+        self.unit_grid = QGridLayout(self.unit_grid_widget)
+        self.unit_grid.setContentsMargins(2, 2, 12, 12)
+        self.unit_grid.setSpacing(10)
+
+        unit_scroll = QScrollArea()
+        unit_scroll.setWidgetResizable(True)
+        unit_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        unit_scroll.setWidget(self.unit_grid_widget)
+        unit_layout.addWidget(unit_scroll)
+
+        lower_splitter.addWidget(unit_panel)
+
+        timeline_panel = QGroupBox("Letzte Ereignisse")
+        timeline_layout = QVBoxLayout(timeline_panel)
+
+        self.timeline = QTableWidget()
+        self.timeline.setColumnCount(4)
+        self.timeline.setHorizontalHeaderLabels(
+            ["Datum", "Bereich", "Ereignis", "Status"]
+        )
+        self.timeline.setAlternatingRowColors(True)
+        self.timeline.setWordWrap(False)
+        self.timeline.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
+        self.timeline.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
+        self.timeline.cellDoubleClicked.connect(self.ereignis_oeffnen)
+        timeline_layout.addWidget(self.timeline)
+
+        lower_splitter.addWidget(timeline_panel)
+        lower_splitter.setSizes([600, 650])
+
+        self.laden()
+
+    @staticmethod
+    def _metric_card(title: str, value: str, icon: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("metricCard")
+        card.setMinimumWidth(190)
+        card.setMinimumHeight(100)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+
+        heading = QLabel(f"{icon}  {title}")
+        heading.setObjectName("metricTitle")
+        heading.setWordWrap(True)
+
+        amount = QLabel(value)
+        amount.setObjectName("metricValue")
+        amount.setWordWrap(True)
+
+        layout.addWidget(heading)
+        layout.addWidget(amount)
+        return card
+
+    @staticmethod
+    def _unit_card(item: dict[str, str]) -> QFrame:
+        card = QFrame()
+        card.setObjectName("metricCard")
+        card.setMinimumWidth(205)
+        card.setMinimumHeight(145)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(13, 11, 13, 11)
+        layout.setSpacing(5)
+
+        heading = QLabel(f'{item["ampel"]}  {item["mieter"]}')
+        heading.setStyleSheet("font-size:17px; font-weight:900;")
+        heading.setWordWrap(True)
+
+        apartment = QLabel(f'Wohnung: {item["wohnung"]}')
+        apartment.setWordWrap(True)
+
+        status = QLabel(item["status"])
+        status.setObjectName("metricTitle")
+
+        area = QLabel(
+            f'Fläche: {item["flaeche"]}'
+            if item["flaeche"]
+            else "Fläche: nicht hinterlegt"
+        )
+        area.setObjectName("metricTitle")
+
+        layout.addWidget(heading)
+        layout.addWidget(apartment)
+        layout.addWidget(status)
+        layout.addWidget(area)
+        layout.addStretch()
+        return card
+
+    def laden(self) -> None:
+        objekt = self.objekt_filter.currentText().strip()
+        self.current_objekt = objekt
+
+        if not objekt:
+            self.object_name.setText("Kein Objekt ausgewählt")
+            self.health_bar.setValue(0)
+            self.photo.setText("Kein Objektfoto vorhanden")
+            return
+
+        status = smart_objekt_status(objekt)
+        health = objekt_gesundheitsindex(objekt)
+
+        self.object_name.setText(
+            f'{health.get("ampel", "⚪")}  {objekt}'
+        )
+        self.health_text.setText(
+            f'{health.get("bewertung", "")} · '
+            f'{len(health.get("gruende", []))} Bewertungshinweis(e)'
+        )
+        self.health_bar.setValue(int(health.get("punkte", 0)))
+
+        object_rows = [
+            row for row in DATA.get("Objekte", [])
+            if (
+                norm_key(feldwert("Objekte", row, ["Objektname", "Objekt"]))
+                == norm_key(objekt)
+            )
+        ]
+        object_row = object_rows[0] if object_rows else []
+
+        details = [
+            ("Adresse", feldwert("Objekte", object_row, ["Adresse", "Straße", "Objektname"])),
+            ("Ort", feldwert("Objekte", object_row, ["Ort"])),
+            ("Vermieter", feldwert("Objekte", object_row, ["Vermieter", "Eigentümer"])),
+            ("Vermieter E-Mail", feldwert("Objekte", object_row, ["Vermieter E-Mail-Adresse", "Vermieter E-Mail"])),
+            ("Baujahr", feldwert("Objekte", object_row, ["Baujahr"])),
+            ("Grundstücksfläche", feldwert("Objekte", object_row, ["Grundstücksfläche"])),
+            ("Wohnungen", str(status.get("wohnungen", 0))),
+            ("Mieter", str(status.get("mieter", 0))),
+            ("Leerstand", str(status.get("freie_wohnungen", 0))),
+        ]
+        self.object_details.setText(
+            "\n".join(
+                f"<b>{label}:</b> {value or 'nicht hinterlegt'}"
+                for label, value in details
+            )
+        )
+
+        while self.cards_grid.count():
+            item = self.cards_grid.takeAt(0)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        cards = [
+            ("Monatsmiete", euro(float(status.get("monatsmiete", 0.0))), "💶"),
+            ("Jahresmiete", euro(float(status.get("jahresmiete", 0.0))), "📈"),
+            ("Saldo", euro(float(status.get("saldo", 0.0))), "Σ"),
+            ("Aufgaben", str(status.get("offene_aufgaben", 0)), "🗂"),
+            ("Rechnungen", str(status.get("offene_rechnungen", 0)), "🧾"),
+            ("Schäden", str(status.get("offene_schaeden", 0)), "⚠"),
+            ("Dokumente", str(status.get("dokumente", 0)), "📄"),
+            ("Überfällig", str(status.get("ueberfaellige_aufgaben", 0)), "⏰"),
+        ]
+
+        for index, card in enumerate(cards):
+            self.cards_grid.addWidget(
+                self._metric_card(*card),
+                index // 4,
+                index % 4,
+            )
+
+        self.photo_paths = gebaeudezwilling_fotos(objekt)
+        self.photo_index = 0
+        self.foto_anzeigen()
+
+        while self.unit_grid.count():
+            item = self.unit_grid.takeAt(0)
+            if item is None:
+                continue
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        units = gebaeudezwilling_einheiten(objekt)
+        for index, unit in enumerate(units):
+            self.unit_grid.addWidget(
+                self._unit_card(unit),
+                index // 2,
+                index % 2,
+            )
+        self.unit_grid.setRowStretch((len(units) // 2) + 1, 1)
+
+        events = gebaeudezwilling_letzte_ereignisse(objekt)
+        self.timeline.setRowCount(len(events))
+
+        for row_index, row in enumerate(events):
+            for col_index, value in enumerate(row[:4]):
+                self.timeline.setItem(
+                    row_index,
+                    col_index,
+                    QTableWidgetItem(str(value)),
+                )
+
+        for col_index, width in enumerate([110, 170, 500, 130]):
+            self.timeline.setColumnWidth(col_index, width)
+
+    def objektbilder_hochladen(self) -> None:
+        objekt = self.current_objekt.strip()
+        if not objekt:
+            QMessageBox.information(
+                self,
+                "Objektbilder",
+                "Bitte zuerst einen Objektordner auswählen.",
+            )
+            return
+
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Objektbilder auswählen",
+            "",
+            "Bilddateien (*.png *.jpg *.jpeg *.webp *.bmp *.gif)",
+        )
+        if not paths:
+            return
+
+        zielordner = objektbilder_ordner(objekt)
+        try:
+            zielordner.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            QMessageBox.warning(self, "Objektbilder", f"Ordner konnte nicht erstellt werden:\n{exc}")
+            return
+
+        copied = 0
+        errors: list[str] = []
+        for source_text in paths:
+            source = Path(source_text)
+            ziel = zielordner / source.name
+            counter = 2
+            while ziel.exists():
+                ziel = zielordner / f"{source.stem}_{counter}{source.suffix}"
+                counter += 1
+            try:
+                shutil.copy2(source, ziel)
+                copied += 1
+            except OSError as exc:
+                errors.append(f"{source.name}: {exc}")
+
+        self.photo_paths = gebaeudezwilling_fotos(objekt)
+        self.photo_index = max(0, len(self.photo_paths) - copied)
+        self.foto_anzeigen()
+
+        message = f"{copied} Objektbild(er) wurden gespeichert."
+        if errors:
+            message += "\n\nNicht gespeichert:\n" + "\n".join(errors)
+            QMessageBox.warning(self, "Objektbilder", message)
+        else:
+            QMessageBox.information(self, "Objektbilder", message)
+
+    def foto_anzeigen(self) -> None:
+        if not self.photo_paths:
+            self.photo.clear()
+            self.photo.setText("Kein Objektfoto vorhanden")
+            self.photo_counter.setText("0 / 0")
+            return
+
+        self.photo_index %= len(self.photo_paths)
+        path = self.photo_paths[self.photo_index]
+        pixmap = QPixmap(str(path))
+
+        if pixmap.isNull():
+            self.photo.setText(f"Bild konnte nicht geladen werden:\n{path.name}")
+        else:
+            self.photo.setPixmap(
+                pixmap.scaled(
+                    self.photo.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+
+        self.photo.setToolTip(str(path))
+        self.photo_counter.setText(
+            f"{self.photo_index + 1} / {len(self.photo_paths)}"
+        )
+
+    def vorheriges_foto(self) -> None:
+        if self.photo_paths:
+            self.photo_index = (self.photo_index - 1) % len(self.photo_paths)
+            self.foto_anzeigen()
+
+    def naechstes_foto(self) -> None:
+        if self.photo_paths:
+            self.photo_index = (self.photo_index + 1) % len(self.photo_paths)
+            self.foto_anzeigen()
+
+    def foto_oeffnen(self) -> None:
+        if self.photo_paths:
+            system_datei_oeffnen(str(self.photo_paths[self.photo_index]))
+
+    def ereignis_oeffnen(self, row: int, _column: int) -> None:
+        item = self.timeline.item(row, 1)
+        if item is not None and item.text().strip():
+            self.nav(item.text().strip())
+
+
+
+def dokument_text_lesen(path: Path) -> str:
+    """Liest Text aus unterstützten Dokumenten, ohne externe Dienste."""
+    suffix = path.suffix.lower()
+
+    if suffix == ".pdf":
+        if PdfReader is None:
+            return ""
+        try:
+            reader = PdfReader(str(path))
+            return "\n".join((page.extract_text() or "") for page in reader.pages)
+        except (OSError, ValueError, TypeError):
+            return ""
+
+    if suffix in {".txt", ".md", ".csv", ".json", ".xml"}:
+        try:
+            return path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return ""
+
+    return ""
+
+
+def dokument_klassifizieren(path: Path, text_value: str = "") -> dict[str, str]:
+    """
+    Regelbasierte, lokale Dokumenterkennung.
+    Es werden keine Daten übertragen und keine Excelstrukturen verändert.
+    """
+    combined = f"{path.name} {text_value}".lower()
+
+    supplier_rules = {
+        "Stadtwerke": ["stadtwerke", "energieversorgung"],
+        "E.ON": ["e.on", "eon"],
+        "EnBW": ["enbw"],
+        "Westnetz": ["westnetz"],
+        "Techem": ["techem"],
+        "Ista": ["ista"],
+        "Brunata": ["brunata"],
+        "Telekom": ["telekom"],
+        "Vodafone": ["vodafone"],
+        "Versicherung": ["versicherung", "police", "versicherungsnummer"],
+        "Schornsteinfeger": ["schornsteinfeger", "feuerstättenschau"],
+    }
+
+    category_rules = {
+        "Versorgerrechnung": [
+            "strom", "gas", "wasser", "energie", "abschlag",
+            "verbrauch", "zählerstand", "kwh", "m³", "m3",
+        ],
+        "Heizkosten": [
+            "heizkosten", "wärme", "heizung", "techem", "ista", "brunata",
+        ],
+        "Versicherung": [
+            "versicherung", "police", "prämie", "schadenversicherung",
+        ],
+        "Mietvertrag": [
+            "mietvertrag", "mietbeginn", "kaltmiete", "warmmiete",
+        ],
+        "Rechnung": [
+            "rechnung", "rechnungsnummer", "rechnungsnr", "brutto", "netto",
+        ],
+        "Kontoauszug": [
+            "kontoauszug", "buchungstag", "wertstellung", "iban", "saldo",
+        ],
+        "Übergabeprotokoll": [
+            "übergabeprotokoll", "wohnungsübergabe", "zählerstände",
+        ],
+        "Schaden": [
+            "schaden", "schadennummer", "reparatur", "mangel",
+        ],
+    }
+
+    supplier = ""
+    supplier_score = 0
+    for name, tokens in supplier_rules.items():
+        score = sum(1 for token in tokens if token in combined)
+        if score > supplier_score:
+            supplier = name
+            supplier_score = score
+
+    category = "Sonstiges Dokument"
+    category_score = 0
+    for name, tokens in category_rules.items():
+        score = sum(1 for token in tokens if token in combined)
+        if score > category_score:
+            category = name
+            category_score = score
+
+    object_matches: list[str] = []
+    for objekt in alle_objektordner():
+        if norm_key(objekt) and norm_key(objekt) in norm_key(combined):
+            object_matches.append(objekt)
+
+    objekt = object_matches[0] if len(object_matches) == 1 else ""
+
+    invoice_number = ""
+    invoice_patterns = [
+        r"(?:rechnungsnummer|rechnungsnr\.?|rechnung\s*nr\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+        r"(?:invoice\s*no\.?)\s*[:#]?\s*([A-Z0-9\-\/]+)",
+    ]
+    for pattern in invoice_patterns:
+        match = re.search(pattern, text_value, re.IGNORECASE)
+        if match:
+            invoice_number = match.group(1).strip()
+            break
+
+    amount = ""
+    amount_match = re.search(
+        r"(?:gesamtbetrag|rechnungsbetrag|brutto|zu\s*zahlen)\s*[: ]+\s*"
+        r"(\d{1,3}(?:\.\d{3})*,\d{2})\s*€?",
+        text_value,
+        re.IGNORECASE,
+    )
+    if amount_match:
+        amount = amount_match.group(1)
+
+    confidence = min(
+        100,
+        20
+        + category_score * 18
+        + supplier_score * 12
+        + (20 if objekt else 0)
+        + (10 if invoice_number else 0),
+    )
+
+    return {
+        "datei": path.name,
+        "pfad": str(path),
+        "kategorie": category,
+        "lieferant": supplier,
+        "objekt": objekt,
+        "rechnungsnummer": invoice_number,
+        "betrag": amount,
+        "sicherheit": f"{confidence} %",
+        "status": "Erkannt" if confidence >= 60 else "Prüfen",
+    }
+
+
+def dokument_dublette_pruefen(item: dict[str, str]) -> str:
+    """Prüft Dateiname, Rechnungsnummer und Pfad gegen vorhandene Dokumente."""
+    filename_key = norm_key(item.get("datei", ""))
+    invoice_key = norm_key(item.get("rechnungsnummer", ""))
+    path_key = norm_key(item.get("pfad", ""))
+
+    for existing in dokumenten_index_rows():
+        existing_filename = norm_key(existing.get("datei", ""))
+        existing_path = norm_key(existing.get("pfad", ""))
+        existing_text = norm_key(existing.get("inhalt", ""))
+
+        if path_key and path_key == existing_path:
+            return "Identischer Pfad vorhanden"
+
+        if filename_key and filename_key == existing_filename:
+            return "Gleicher Dateiname vorhanden"
+
+        if invoice_key and invoice_key in existing_text:
+            return "Rechnungsnummer bereits vorhanden"
+
+    return ""
+
+
+def dokument_automatik_scan(folder: Path) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+
+    supported = {
+        ".pdf", ".txt", ".md", ".csv", ".json", ".xml",
+        ".png", ".jpg", ".jpeg", ".webp", ".bmp",
+    }
+
+    if not folder.exists():
+        return result
+
+    for path in sorted(folder.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in supported:
+            continue
+
+        text_value = dokument_text_lesen(path)
+        item = dokument_klassifizieren(path, text_value)
+        item["dublette"] = dokument_dublette_pruefen(item)
+        result.append(item)
+
+    return result
+
+
+class DokumentenautomatisierungProSeite(QWidget):
+    """Lokale Dokumentklassifizierung mit kontrollierter Übernahme."""
+
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.rows: list[dict[str, str]] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(14)
+
+        title = QLabel("Dokumentenautomatisierung PRO")
+        title.setObjectName("pageTitle")
+        root.addWidget(title)
+
+        info = QLabel(
+            "Dokumente lokal klassifizieren, Objektordner vorschlagen, "
+            "Lieferanten und Rechnungsdaten erkennen sowie Dubletten prüfen."
+        )
+        info.setObjectName("subTitle")
+        info.setWordWrap(True)
+        root.addWidget(info)
+
+        top = QHBoxLayout()
+
+        self.folder = QLineEdit()
+        self.folder.setPlaceholderText("Ordner mit zu prüfenden Dokumenten ...")
+        self.folder.setText(str(DOKUMENTE_DIR))
+
+        choose = QPushButton("Ordner wählen")
+        choose.clicked.connect(self.ordner_waehlen)
+
+        scan = QPushButton("Dokumente prüfen")
+        scan.setObjectName("primaryButton")
+        scan.clicked.connect(self.scannen)
+
+        open_center = QPushButton("Dokumenten-Center")
+        open_center.clicked.connect(lambda: self.nav("Dokumenten-Center 2.0"))
+
+        top.addWidget(self.folder, 1)
+        top.addWidget(choose)
+        top.addWidget(scan)
+        top.addWidget(open_center)
+        root.addLayout(top)
+
+        self.summary = QLabel("")
+        self.summary.setObjectName("metricTitle")
+        root.addWidget(self.summary)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(10)
+        self.table.setHorizontalHeaderLabels([
+            "Status", "Datei", "Kategorie", "Lieferant", "Objektordner",
+            "Rechnungsnummer", "Betrag", "Sicherheit", "Dublette", "Pfad",
+        ])
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
+        self.table.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
+        self.table.cellDoubleClicked.connect(self.datei_oeffnen)
+        root.addWidget(self.table, 1)
+
+        actions = QHBoxLayout()
+
+        create_task = QPushButton("Prüfaufgabe erzeugen")
+        create_task.clicked.connect(self.pruefaufgabe_erzeugen)
+
+        export_btn = QPushButton("Ergebnis exportieren")
+        export_btn.clicked.connect(self.exportieren)
+
+        actions.addWidget(create_task)
+        actions.addWidget(export_btn)
+        actions.addStretch()
+        root.addLayout(actions)
+
+    def ordner_waehlen(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Dokumentenordner auswählen",
+            self.folder.text().strip() or str(DOKUMENTE_DIR),
+        )
+        if selected:
+            self.folder.setText(selected)
+
+    def scannen(self) -> None:
+        folder = Path(self.folder.text().strip())
+        self.rows = dokument_automatik_scan(folder)
+
+        recognized = sum(1 for item in self.rows if item["status"] == "Erkannt")
+        duplicates = sum(1 for item in self.rows if item["dublette"])
+
+        self.summary.setText(
+            f"{len(self.rows)} Dokument(e) geprüft · "
+            f"{recognized} erkannt · {duplicates} mögliche Dublette(n)"
+        )
+
+        self.table.setRowCount(len(self.rows))
+
+        keys = [
+            "status", "datei", "kategorie", "lieferant", "objekt",
+            "rechnungsnummer", "betrag", "sicherheit", "dublette", "pfad",
+        ]
+
+        for row_index, item in enumerate(self.rows):
+            for col_index, key in enumerate(keys):
+                self.table.setItem(
+                    row_index,
+                    col_index,
+                    QTableWidgetItem(str(item.get(key, ""))),
+                )
+
+        for col_index, width in enumerate(
+            [100, 240, 180, 160, 230, 170, 110, 100, 240, 650]
+        ):
+            self.table.setColumnWidth(col_index, width)
+
+    def _selected_item(self) -> dict[str, str] | None:
+        row = self.table.currentRow()
+        if row < 0 or row >= len(self.rows):
+            return None
+        return self.rows[row]
+
+    def datei_oeffnen(self, row: int, _column: int) -> None:
+        if 0 <= row < len(self.rows):
+            path = Path(self.rows[row].get("pfad", ""))
+            if path.exists():
+                system_datei_oeffnen(str(path))
+
+    def pruefaufgabe_erzeugen(self) -> None:
+        item = self._selected_item()
+        if item is None:
+            QMessageBox.information(
+                self,
+                "Dokumentenautomatisierung",
+                "Bitte zuerst ein Dokument auswählen.",
+            )
+            return
+
+        fields = SCHEMA.get("Aufgaben", [])
+        if not fields:
+            return
+
+        values = ["" for _ in fields]
+        defaults = {
+            "Aufgabe": f'Dokument prüfen: {item.get("datei", "")}',
+            "Objekt": item.get("objekt", ""),
+            "Objektordner": item.get("objekt", ""),
+            "Bereich": "Dokumentenprüfung",
+            "Priorität": "Normal" if not item.get("dublette") else "Hoch",
+            "Status": "Neu",
+            "Verantwortlich": aktueller_mitarbeitername(),
+            "Notiz": (
+                f'Kategorie: {item.get("kategorie", "")}\n'
+                f'Lieferant: {item.get("lieferant", "")}\n'
+                f'Rechnungsnummer: {item.get("rechnungsnummer", "")}\n'
+                f'Dublette: {item.get("dublette", "")}\n'
+                f'Pfad: {item.get("pfad", "")}'
+            ),
+        }
+
+        for index, field in enumerate(fields):
+            if field in defaults:
+                values[index] = defaults[field]
+
+        dialog = EingabeDialog(
+            "Dokumenten-Prüfaufgabe",
+            fields,
+            values,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            DATA.setdefault("Aufgaben", []).append(dialog.values())
+            speichere_tabelle("Aufgaben")
+            aktivitaet_protokollieren(
+                "Dokumentenautomatisierung",
+                "Prüfaufgabe erzeugt",
+                beschreibung=item.get("datei", ""),
+            )
+
+    def exportieren(self) -> None:
+        if not self.rows:
+            QMessageBox.information(
+                self,
+                "Dokumentenautomatisierung",
+                "Keine Ergebnisse vorhanden.",
+            )
+            return
+
+        EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+        target, _ = QFileDialog.getSaveFileName(
+            self,
+            "Ergebnis exportieren",
+            str(EXPORT_DIR / "dokumentenautomatisierung.xlsx"),
+            "Excel-Dateien (*.xlsx)",
+        )
+        if not target:
+            return
+
+        target_path = Path(target)
+        if target_path.suffix.lower() != ".xlsx":
+            target_path = target_path.with_suffix(".xlsx")
+
+        workbook = Workbook()
+        sheet = workbook.active
+        if not isinstance(sheet, Worksheet):
+            return
+
+        sheet.title = "Dokumentenautomatisierung"
+        headers = [
+            "Status", "Datei", "Kategorie", "Lieferant", "Objektordner",
+            "Rechnungsnummer", "Betrag", "Sicherheit", "Dublette", "Pfad",
+        ]
+        sheet.append(headers)
+
+        keys = [
+            "status", "datei", "kategorie", "lieferant", "objekt",
+            "rechnungsnummer", "betrag", "sicherheit", "dublette", "pfad",
+        ]
+
+        for item in self.rows:
+            sheet.append([item.get(key, "") for key in keys])
+
+        for col_index, width in enumerate(
+            [14, 32, 24, 22, 30, 24, 16, 14, 34, 90],
+            start=1,
+        ):
+            sheet.column_dimensions[
+                sheet.cell(1, col_index).column_letter
+            ].width = width
+
+        workbook.save(target_path)
+        QMessageBox.information(
+            self,
+            "Dokumentenautomatisierung",
+            f"Ergebnis exportiert:\n{target_path}",
+        )
+
+
+
+MOBILE_PORTAL_DIR = APP_DIR / "mobile_portal"
+MOBILE_INBOX_DIR = DATEN_DIR / "mobile_zeiterfassung"
+MOBILE_ARCHIVE_DIR = MOBILE_INBOX_DIR / "archiv"
+
+
+def mobile_verzeichnisse_sicherstellen() -> None:
+    for folder in [MOBILE_PORTAL_DIR, MOBILE_INBOX_DIR, MOBILE_ARCHIVE_DIR]:
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+
+def mobile_stundeneintraege_laden() -> list[dict[str, Any]]:
+    mobile_verzeichnisse_sicherstellen()
+    rows: list[dict[str, Any]] = []
+
+    for path in sorted(MOBILE_INBOX_DIR.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+
+        entries = data if isinstance(data, list) else [data]
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            item = dict(entry)
+            item["_datei"] = str(path)
+            item["_status"] = str(item.get("status", "Eingereicht"))
+            rows.append(item)
+
+    rows.sort(
+        key=lambda item: (
+            str(item.get("datum", "")),
+            str(item.get("mitarbeiter", "")),
+            str(item.get("beginn", "")),
+        ),
+        reverse=True,
+    )
+    return rows
+
+
+def mobile_stunden_berechnen(
+    beginn: str,
+    ende: str,
+    pause_minuten: Any,
+) -> float:
+
+    try:
+        start = datetime.strptime(str(beginn).strip(), "%H:%M")
+        end = datetime.strptime(str(ende).strip(), "%H:%M")
+        if end < start:
+            end += timedelta(days=1)
+        pause = max(0, int(float(str(pause_minuten or 0).replace(",", "."))))
+        hours = (end - start).total_seconds() / 3600 - pause / 60
+        return round(max(0.0, hours), 2)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def mobile_eintrag_signatur(item: dict[str, Any]) -> str:
+    raw = "|".join([
+        str(item.get("id", "")),
+        str(item.get("mitarbeiter", "")),
+        str(item.get("datum", "")),
+        str(item.get("objektordner", "")),
+        str(item.get("beginn", "")),
+        str(item.get("ende", "")),
+    ])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def mobile_bereits_importiert(signatur: str) -> bool:
+    marker_file = MOBILE_ARCHIVE_DIR / "importiert.json"
+    try:
+        values = json.loads(marker_file.read_text(encoding="utf-8"))
+        return signatur in values if isinstance(values, list) else False
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def mobile_import_markieren(signatur: str) -> None:
+    marker_file = MOBILE_ARCHIVE_DIR / "importiert.json"
+    try:
+        values = json.loads(marker_file.read_text(encoding="utf-8"))
+        if not isinstance(values, list):
+            values = []
+    except (OSError, ValueError, json.JSONDecodeError):
+        values = []
+
+    if signatur not in values:
+        values.append(signatur)
+
+    try:
+        marker_file.write_text(
+            json.dumps(values, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def mobile_stundennachweis_zeile(item: dict[str, Any]) -> list[Any]:
+    fields = SCHEMA.get("Stundennachweise", [])
+    hours = mobile_stunden_berechnen(
+        str(item.get("beginn", "")),
+        str(item.get("ende", "")),
+        item.get("pause", 0),
+    )
+
+    values = {
+        "Mitarbeiter": str(item.get("mitarbeiter", "")),
+        "Datum": str(item.get("datum", "")),
+        "Objekt": str(item.get("objektordner", "")),
+        "Objektordner": str(item.get("objektordner", "")),
+        "Wohnung": str(item.get("wohnung", "")),
+        "Tätigkeit": str(item.get("taetigkeit", "")),
+        "Beginn": str(item.get("beginn", "")),
+        "Ende": str(item.get("ende", "")),
+        "Pause": str(item.get("pause", "")),
+        "Stunden": str(hours).replace(".", ","),
+        "Notiz": str(item.get("notiz", "")),
+        "Status": "Freigegeben",
+    }
+
+    row = ["" for _ in fields]
+    for index, field in enumerate(fields):
+        if field in values:
+            row[index] = values[field]
+    return row
+
+
+def mobile_portal_dateien_erstellen() -> None:
+    mobile_verzeichnisse_sicherstellen()
+
+    objects = alle_objektordner()
+    portal_config = {
+        "mitarbeiter": ["Julia", "Franzi", "Robert", "Ralf"],
+        "objektordner": objects,
+        "taetigkeiten": [
+            "Hausmeister",
+            "Reparatur",
+            "Reinigung",
+            "Gartenpflege",
+            "Winterdienst",
+            "Wohnungsübergabe",
+            "Wohnungsabnahme",
+            "Besichtigung",
+            "Verwaltung",
+            "Sonstiges",
+        ],
+    }
+
+    (MOBILE_PORTAL_DIR / "config.json").write_text(
+        json.dumps(portal_config, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    index_html = """<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#071a35">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+  <title>DBS Zeiterfassung</title>
+</head>
+<body>
+  <header>
+    <h1>DBS Zeiterfassung</h1>
+    <p>Mobile Arbeitszeit- und Tätigkeitsmeldung</p>
+  </header>
+  <main>
+    <section class="card">
+      <label>Mitarbeiter<select id="mitarbeiter"></select></label>
+      <label>Datum<input id="datum" type="date"></label>
+      <label>Objektordner<select id="objekt"></select></label>
+      <label>Wohnung<input id="wohnung" placeholder="optional"></label>
+      <label>Tätigkeit<select id="taetigkeit"></select></label>
+      <div class="grid">
+        <label>Beginn<input id="beginn" type="time"></label>
+        <label>Ende<input id="ende" type="time"></label>
+      </div>
+      <label>Pause in Minuten<input id="pause" type="number" min="0" value="0"></label>
+      <label>Notiz<textarea id="notiz" rows="4"></textarea></label>
+      <label>Foto<input id="foto" type="file" accept="image/*" capture="environment"></label>
+      <div id="stunden" class="result">0,00 Stunden</div>
+      <button id="speichern">Eintrag speichern</button>
+      <button id="exportieren" class="secondary">Einträge exportieren</button>
+    </section>
+    <section class="card">
+      <h2>Gespeicherte Einträge</h2>
+      <div id="liste"></div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
+"""
+    (MOBILE_PORTAL_DIR / "index.html").write_text(index_html, encoding="utf-8")
+
+    style_css = """
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#0b1628;background:#eef3f9}
+*{box-sizing:border-box}body{margin:0}header{background:#071a35;color:white;padding:22px 18px}
+header h1{margin:0 0 6px;font-size:24px}header p{margin:0;color:#b9cdeb}
+main{max-width:680px;margin:auto;padding:16px}.card{background:white;border-radius:18px;padding:18px;
+box-shadow:0 10px 30px rgba(15,23,42,.08);margin-bottom:16px}
+label{display:block;font-weight:700;margin-bottom:12px}input,select,textarea{width:100%;margin-top:6px;
+padding:12px;border:1px solid #d8e2ef;border-radius:11px;font:inherit;background:white}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.result{font-size:23px;font-weight:900;
+padding:14px 0;color:#1d4ed8}button{width:100%;padding:13px;border:0;border-radius:12px;
+background:#2563eb;color:white;font-weight:900;font-size:16px;margin-top:8px}
+button.secondary{background:#e8eef6;color:#0b1628}.entry{padding:12px;border-bottom:1px solid #e5eaf1}
+.entry strong{display:block}.muted{color:#64748b;font-size:13px}
+@media(max-width:520px){.grid{grid-template-columns:1fr}}
+"""
+    (MOBILE_PORTAL_DIR / "style.css").write_text(style_css, encoding="utf-8")
+
+    app_js = r"""
+let config={mitarbeiter:[],objektordner:[],taetigkeiten:[]};
+const $=id=>document.getElementById(id);
+const entries=()=>JSON.parse(localStorage.getItem("dbs_zeiten")||"[]");
+const saveEntries=v=>localStorage.setItem("dbs_zeiten",JSON.stringify(v));
+
+function fillSelect(id,values,first="Bitte wählen"){
+  const el=$(id); el.innerHTML="";
+  const empty=document.createElement("option"); empty.textContent=first; empty.value=""; el.appendChild(empty);
+  values.forEach(value=>{const o=document.createElement("option");o.value=value;o.textContent=value;el.appendChild(o);});
+}
+function calc(){
+  const b=$("beginn").value,e=$("ende").value,p=parseFloat($("pause").value||0);
+  if(!b||!e){$("stunden").textContent="0,00 Stunden";return 0}
+  let [bh,bm]=b.split(":").map(Number),[eh,em]=e.split(":").map(Number);
+  let mins=(eh*60+em)-(bh*60+bm); if(mins<0)mins+=1440; mins=Math.max(0,mins-p);
+  const h=Math.round(mins/60*100)/100;$("stunden").textContent=h.toFixed(2).replace(".",",")+" Stunden";return h;
+}
+async function imageData(file){
+  if(!file)return "";
+  return await new Promise(resolve=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.readAsDataURL(file)});
+}
+async function store(){
+  const item={
+    id:crypto.randomUUID?crypto.randomUUID():Date.now().toString(),
+    mitarbeiter:$("mitarbeiter").value,datum:$("datum").value,objektordner:$("objekt").value,
+    wohnung:$("wohnung").value,taetigkeit:$("taetigkeit").value,beginn:$("beginn").value,
+    ende:$("ende").value,pause:$("pause").value,stunden:calc(),notiz:$("notiz").value,
+    foto:await imageData($("foto").files[0]),status:"Eingereicht",erstellt_am:new Date().toISOString()
+  };
+  if(!item.mitarbeiter||!item.datum||!item.objektordner||!item.beginn||!item.ende){
+    alert("Bitte Mitarbeiter, Datum, Objektordner, Beginn und Ende ausfüllen.");return;
+  }
+  const values=entries();values.push(item);saveEntries(values);render();alert("Eintrag lokal gespeichert.");
+}
+function render(){
+  const list=$("liste"),values=entries();list.innerHTML="";
+  if(!values.length){list.textContent="Noch keine Einträge gespeichert.";return}
+  values.slice().reverse().forEach(item=>{
+    const d=document.createElement("div");d.className="entry";
+    d.innerHTML=`<strong>${item.datum} · ${item.mitarbeiter}</strong>
+    <div>${item.objektordner} · ${item.taetigkeit}</div>
+    <div class="muted">${item.beginn}–${item.ende} · ${String(item.stunden).replace(".",",")} Std.</div>`;
+    list.appendChild(d);
+  });
+}
+function exportData(){
+  const values=entries();if(!values.length){alert("Keine Einträge vorhanden.");return}
+  const blob=new Blob([JSON.stringify(values,null,2)],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=`mobile_zeiterfassung_${new Date().toISOString().slice(0,10)}.json`;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+fetch("config.json").then(r=>r.json()).then(value=>{
+  config=value;fillSelect("mitarbeiter",config.mitarbeiter);fillSelect("objekt",config.objektordner);
+  fillSelect("taetigkeit",config.taetigkeiten);$("datum").value=new Date().toISOString().slice(0,10);
+}).catch(()=>{});
+["beginn","ende","pause"].forEach(id=>$(id).addEventListener("input",calc));
+$("speichern").addEventListener("click",store);$("exportieren").addEventListener("click",exportData);
+render();
+if("serviceWorker" in navigator)navigator.serviceWorker.register("service-worker.js").catch(()=>{});
+"""
+    (MOBILE_PORTAL_DIR / "app.js").write_text(app_js, encoding="utf-8")
+
+    manifest = {
+        "name": "DBS Mobile Zeiterfassung",
+        "short_name": "DBS Zeit",
+        "start_url": "./index.html",
+        "display": "standalone",
+        "background_color": "#eef3f9",
+        "theme_color": "#071a35",
+        "icons": [],
+    }
+    (MOBILE_PORTAL_DIR / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    service_worker = """
+const CACHE="dbs-mobile-v1";
+const FILES=["./","index.html","style.css","app.js","config.json","manifest.json"];
+self.addEventListener("install",e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES))));
+self.addEventListener("fetch",e=>e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))));
+"""
+    (MOBILE_PORTAL_DIR / "service-worker.js").write_text(
+        service_worker,
+        encoding="utf-8",
+    )
+
+
+
+
+
+FIELD_IMPORT_DIR = DATEN_DIR / "dbs_field_import"
+FIELD_IMPORT_ARCHIVE_DIR = FIELD_IMPORT_DIR / "archiv"
+
+
+def field_import_verzeichnisse_sicherstellen() -> None:
+    for folder in [FIELD_IMPORT_DIR, FIELD_IMPORT_ARCHIVE_DIR]:
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+
+
+def field_schadenpaket_lesen(zip_path: Path) -> dict[str, Any]:
+    """
+    Liest ein DBS-Field-Schadenpaket, ohne Dateien dauerhaft zu verändern.
+    Erwartet `schaden.json` sowie optionale Bilddateien.
+    """
+    if not zip_path.exists() or zip_path.suffix.lower() != ".zip":
+        raise ValueError("Ungültiges Schadenpaket.")
+
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        names = archive.namelist()
+        json_name = next(
+            (name for name in names if Path(name).name.lower() == "schaden.json"),
+            None,
+        )
+        if json_name is None:
+            raise ValueError("Die Datei schaden.json fehlt im ZIP-Paket.")
+
+        with archive.open(json_name) as source:
+            payload = json.loads(source.read().decode("utf-8"))
+
+        if not isinstance(payload, dict):
+            raise ValueError("Die Schadenmeldung enthält kein gültiges JSON-Objekt.")
+
+        photo_names = [
+            name
+            for name in names
+            if Path(name).suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+        ]
+
+    return {
+        "zip_path": str(zip_path),
+        "id": str(payload.get("id", "")).strip(),
+        "typ": str(payload.get("typ", "")).strip(),
+        "mitarbeiter": str(payload.get("mitarbeiter", "")).strip(),
+        "objektordner": str(payload.get("objektordner", "")).strip(),
+        "wohnung": str(payload.get("wohnung", "")).strip(),
+        "raum": str(payload.get("raum", "")).strip(),
+        "schadensart": str(payload.get("schadensart", "")).strip(),
+        "prioritaet": str(payload.get("prioritaet", "")).strip(),
+        "beschreibung": str(payload.get("beschreibung", "")).strip(),
+        "status": str(payload.get("status", "Gemeldet")).strip() or "Gemeldet",
+        "erstellt_am": str(payload.get("erstellt_am", "")).strip(),
+        "fotos": photo_names,
+        "roh": payload,
+    }
+
+
+def field_schadenpaket_signatur(item: dict[str, Any]) -> str:
+    raw = "|".join([
+        str(item.get("id", "")),
+        str(item.get("objektordner", "")),
+        str(item.get("erstellt_am", "")),
+        str(item.get("beschreibung", "")),
+        str(item.get("zip_path", "")),
+    ])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def field_import_marker_laden() -> list[str]:
+    field_import_verzeichnisse_sicherstellen()
+    marker = FIELD_IMPORT_ARCHIVE_DIR / "importiert.json"
+
+    try:
+        values = json.loads(marker.read_text(encoding="utf-8"))
+        return values if isinstance(values, list) else []
+    except (OSError, ValueError, json.JSONDecodeError):
+        return []
+
+
+def field_import_marker_speichern(values: list[str]) -> None:
+    field_import_verzeichnisse_sicherstellen()
+    marker = FIELD_IMPORT_ARCHIVE_DIR / "importiert.json"
+
+    try:
+        marker.write_text(
+            json.dumps(sorted(set(values)), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def field_import_bereits_importiert(item: dict[str, Any]) -> bool:
+    return field_schadenpaket_signatur(item) in field_import_marker_laden()
+
+
+def field_schaden_fotoziel(objektordner: str, package_id: str) -> Path:
+    """
+    Legt einen Unterordner innerhalb des vorhandenen Objektordners an.
+    Die Excelstruktur bleibt dabei unverändert.
+    """
+    object_folder = normalisiere_gueltigen_objektordner(objektordner)
+    if not object_folder:
+        raise ValueError("Der Objektordner ist ungültig oder nicht eindeutig.")
+
+    base = Path(object_folder)
+
+    if not base.is_absolute():
+        base = DOKUMENTE_DIR / base
+
+    target = base / "Schäden" / (package_id or datetime.now().strftime("%Y%m%d_%H%M%S"))
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def field_schaden_fotos_extrahieren(
+    item: dict[str, Any],
+    target_dir: Path,
+) -> list[str]:
+    zip_path = Path(str(item.get("zip_path", "")))
+    extracted: list[str] = []
+
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        for index, member in enumerate(item.get("fotos", []), start=1):
+            suffix = Path(member).suffix.lower() or ".jpg"
+            target = target_dir / f"foto_{index:02d}{suffix}"
+
+            with archive.open(member) as source, target.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
+
+            extracted.append(str(target))
+
+        metadata_target = target_dir / "schaden.json"
+        metadata_target.write_text(
+            json.dumps(item.get("roh", {}), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    return extracted
+
+
+def field_schaden_zeile_erzeugen(
+    item: dict[str, Any],
+    photo_paths: list[str],
+) -> list[Any]:
+    fields = SCHEMA.get("Schäden", [])
+    row = ["" for _ in fields]
+
+    values = {
+        "Objekt": item.get("objektordner", ""),
+        "Objektordner": item.get("objektordner", ""),
+        "Wohnung": item.get("wohnung", ""),
+        "Raum": item.get("raum", ""),
+        "Bereich": item.get("raum", ""),
+        "Schadensart": item.get("schadensart", ""),
+        "Kategorie": item.get("schadensart", ""),
+        "Priorität": item.get("prioritaet", ""),
+        "Beschreibung": item.get("beschreibung", ""),
+        "Schaden": item.get("beschreibung", ""),
+        "Status": item.get("status", "Gemeldet"),
+        "Mitarbeiter": item.get("mitarbeiter", ""),
+        "Verantwortlich": item.get("mitarbeiter", ""),
+        "Datum": item.get("erstellt_am", "")[:10],
+        "Erstellt am": item.get("erstellt_am", ""),
+        "Foto": photo_paths[0] if photo_paths else "",
+        "Fotos": " | ".join(photo_paths),
+        "Datei": item.get("zip_path", ""),
+        "Dokument": item.get("zip_path", ""),
+        "Notiz": (
+            f'DBS Field ID: {item.get("id", "")}\n'
+            f'Raum: {item.get("raum", "")}\n'
+            f'Fotos: {len(photo_paths)}'
+        ),
+    }
+
+    for index, field in enumerate(fields):
+        if field in values:
+            row[index] = values[field]
+
+    return row
+
+
+def field_schaden_importieren(item: dict[str, Any]) -> tuple[list[str], str]:
+    """
+    Importiert eine geprüfte Schadenmeldung.
+    Es wird nur in bestehende Tabellen geschrieben; die Excelstruktur bleibt gleich.
+    """
+    if field_import_bereits_importiert(item):
+        raise ValueError("Dieses Schadenpaket wurde bereits importiert.")
+
+    if norm_key(item.get("typ", "")) not in {"schaden", "schadenmeldung"}:
+        raise ValueError("Das ZIP-Paket ist keine DBS-Field-Schadenmeldung.")
+
+    if not item.get("objektordner"):
+        raise ValueError("Der Objektordner fehlt.")
+
+    if not item.get("beschreibung"):
+        raise ValueError("Die Schadensbeschreibung fehlt.")
+
+    target_dir = field_schaden_fotoziel(
+        str(item.get("objektordner", "")),
+        str(item.get("id", "")),
+    )
+    photo_paths = field_schaden_fotos_extrahieren(item, target_dir)
+
+    fields = SCHEMA.get("Schäden", [])
+    if not fields:
+        raise ValueError("Die bestehende Tabelle Schäden wurde nicht gefunden.")
+
+    DATA.setdefault("Schäden", []).append(
+        field_schaden_zeile_erzeugen(item, photo_paths)
+    )
+    speichere_tabelle("Schäden")
+
+    signature = field_schadenpaket_signatur(item)
+    markers = field_import_marker_laden()
+    markers.append(signature)
+    field_import_marker_speichern(markers)
+
+    archive_target = FIELD_IMPORT_ARCHIVE_DIR / Path(
+        str(item.get("zip_path", "schaden.zip"))
+    ).name
+
+    try:
+        shutil.copy2(str(item.get("zip_path", "")), archive_target)
+    except OSError:
+        pass
+
+    aktivitaet_protokollieren(
+        "DBS Field Import",
+        "Schadenmeldung importiert",
+        beschreibung=(
+            f'{item.get("objektordner", "")} · '
+            f'{item.get("schadensart", "")} · '
+            f'{item.get("prioritaet", "")}'
+        ),
+        status=item.get("status", "Gemeldet"),
+    )
+
+    return photo_paths, str(target_dir)
+
+
+class DbsFieldImportSeite(QWidget):
+    """Importzentrale für DBS-Field-Schadenpakete."""
+
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.current_item: dict[str, Any] | None = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(14)
+
+        title = QLabel("DBS Field Import")
+        title.setObjectName("pageTitle")
+        root.addWidget(title)
+
+        subtitle = QLabel(
+            "Schadenpakete aus der Android-App prüfen, Fotos anzeigen "
+            "und kontrolliert in die bestehende Schadenstabelle übernehmen."
+        )
+        subtitle.setObjectName("subTitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        toolbar = QHBoxLayout()
+
+        self.path_input = QLineEdit()
+        self.path_input.setPlaceholderText("DBS-Field-Schadenpaket (*.zip) ...")
+
+        choose = QPushButton("ZIP auswählen")
+        choose.clicked.connect(self.zip_waehlen)
+
+        inspect = QPushButton("Prüfen")
+        inspect.setObjectName("primaryButton")
+        inspect.clicked.connect(self.pruefen)
+
+        open_archive = QPushButton("Importarchiv öffnen")
+        open_archive.clicked.connect(
+            lambda: system_datei_oeffnen(str(FIELD_IMPORT_ARCHIVE_DIR))
+        )
+
+        toolbar.addWidget(self.path_input, 1)
+        toolbar.addWidget(choose)
+        toolbar.addWidget(inspect)
+        toolbar.addWidget(open_archive)
+        root.addLayout(toolbar)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        root.addWidget(splitter, 1)
+
+        detail_panel = QGroupBox("Schadendaten")
+        detail_layout = QFormLayout(detail_panel)
+
+        self.detail_labels: dict[str, QLabel] = {}
+        for key, label_text in [
+            ("status", "Prüfstatus"),
+            ("mitarbeiter", "Mitarbeiter"),
+            ("objektordner", "Objektordner"),
+            ("wohnung", "Wohnung"),
+            ("raum", "Raum"),
+            ("schadensart", "Schadensart"),
+            ("prioritaet", "Priorität"),
+            ("erstellt_am", "Erstellt am"),
+            ("beschreibung", "Beschreibung"),
+            ("fotos_count", "Fotos"),
+        ]:
+            label = QLabel("")
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            self.detail_labels[key] = label
+            detail_layout.addRow(label_text + ":", label)
+
+        splitter.addWidget(detail_panel)
+
+        photo_panel = QGroupBox("Fotovorschau")
+        photo_layout = QVBoxLayout(photo_panel)
+
+        self.photo_list = QListWidget()
+        self.photo_list.currentRowChanged.connect(self.foto_anzeigen)
+        photo_layout.addWidget(self.photo_list)
+
+        self.photo_preview = QLabel("Kein Foto ausgewählt")
+        self.photo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.photo_preview.setMinimumSize(420, 320)
+        self.photo_preview.setStyleSheet(
+            "border:1px solid #dce5f0; border-radius:12px; "
+            "background:#f5f8fc; color:#64748b;"
+        )
+        photo_layout.addWidget(self.photo_preview, 1)
+
+        splitter.addWidget(photo_panel)
+        splitter.setSizes([520, 680])
+
+        actions = QHBoxLayout()
+
+        import_button = QPushButton("Schaden übernehmen")
+        import_button.setObjectName("primaryButton")
+        import_button.clicked.connect(self.uebernehmen)
+
+        open_damage = QPushButton("Schäden öffnen")
+        open_damage.clicked.connect(lambda: self.nav("Schäden"))
+
+        actions.addWidget(import_button)
+        actions.addWidget(open_damage)
+        actions.addStretch()
+        root.addLayout(actions)
+
+    def zip_waehlen(self) -> None:
+        field_import_verzeichnisse_sicherstellen()
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "DBS-Field-Schadenpaket auswählen",
+            str(FIELD_IMPORT_DIR),
+            "ZIP-Dateien (*.zip)",
+        )
+        if path:
+            self.path_input.setText(path)
+            self.pruefen()
+
+    def pruefen(self) -> None:
+        path = Path(self.path_input.text().strip())
+
+        try:
+            self.current_item = field_schadenpaket_lesen(path)
+        except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            self.current_item = None
+            QMessageBox.warning(
+                self,
+                "DBS Field Import",
+                f"Das Paket konnte nicht gelesen werden:\n{exc}",
+            )
+            return
+
+        item = self.current_item
+        valid_object = normalisiere_gueltigen_objektordner(
+            item.get("objektordner", "")
+        )
+        duplicate = field_import_bereits_importiert(item)
+
+        if duplicate:
+            status = "Bereits importiert"
+        elif not valid_object:
+            status = "Objektordner prüfen"
+        elif not item.get("beschreibung"):
+            status = "Beschreibung fehlt"
+        else:
+            status = "Importbereit"
+
+        values = dict(item)
+        values["status"] = status
+        values["fotos_count"] = str(len(item.get("fotos", [])))
+
+        for key, label in self.detail_labels.items():
+            label.setText(str(values.get(key, "")))
+
+        self.photo_list.clear()
+        for name in item.get("fotos", []):
+            self.photo_list.addItem(Path(name).name)
+
+        if self.photo_list.count():
+            self.photo_list.setCurrentRow(0)
+        else:
+            self.photo_preview.clear()
+            self.photo_preview.setText("Keine Fotos im Paket")
+
+    def foto_anzeigen(self, row: int) -> None:
+        if (
+            self.current_item is None
+            or row < 0
+            or row >= len(self.current_item.get("fotos", []))
+        ):
+            return
+
+        member = self.current_item["fotos"][row]
+        zip_path = Path(str(self.current_item.get("zip_path", "")))
+
+        try:
+            with zipfile.ZipFile(zip_path, "r") as archive:
+                raw = archive.read(member)
+        except (OSError, KeyError, zipfile.BadZipFile):
+            self.photo_preview.setText("Foto konnte nicht gelesen werden")
+            return
+
+        pixmap = QPixmap()
+        pixmap.loadFromData(raw)
+
+        if pixmap.isNull():
+            self.photo_preview.setText("Foto konnte nicht angezeigt werden")
+            return
+
+        self.photo_preview.setPixmap(
+            pixmap.scaled(
+                self.photo_preview.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+    def uebernehmen(self) -> None:
+        if self.current_item is None:
+            QMessageBox.information(
+                self,
+                "DBS Field Import",
+                "Bitte zuerst ein Schadenpaket prüfen.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Schaden übernehmen",
+            "Soll die geprüfte Schadenmeldung jetzt übernommen werden?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            photo_paths, target_dir = field_schaden_importieren(
+                self.current_item
+            )
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+            QMessageBox.warning(
+                self,
+                "DBS Field Import",
+                f"Der Import ist fehlgeschlagen:\n{exc}",
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "DBS Field Import",
+            "Die Schadenmeldung wurde übernommen.\n\n"
+            f"Fotos: {len(photo_paths)}\n"
+            f"Zielordner: {target_dir}",
+        )
+        self.pruefen()
+
+
+
+FIELD_INBOX_DIR = FIELD_IMPORT_DIR / "eingang"
+
+
+def field_eingang_verzeichnisse_sicherstellen() -> None:
+    field_import_verzeichnisse_sicherstellen()
+    FIELD_INBOX_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def field_eingangspakete_laden() -> list[dict[str, Any]]:
+    field_eingang_verzeichnisse_sicherstellen()
+    result: list[dict[str, Any]] = []
+
+    for zip_path in sorted(FIELD_INBOX_DIR.glob("*.zip")):
+        try:
+            item = field_schadenpaket_lesen(zip_path)
+            valid_object = bool(
+                normalisiere_gueltigen_objektordner(
+                    item.get("objektordner", "")
+                )
+            )
+            duplicate = field_import_bereits_importiert(item)
+
+            if duplicate:
+                status = "Bereits importiert"
+            elif not valid_object:
+                status = "Objektordner prüfen"
+            elif not item.get("beschreibung"):
+                status = "Beschreibung fehlt"
+            else:
+                status = "Importbereit"
+
+            item["pruefstatus"] = status
+            item["dateiname"] = zip_path.name
+            item["fotoanzahl"] = len(item.get("fotos", []))
+            result.append(item)
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+            result.append({
+                "zip_path": str(zip_path),
+                "dateiname": zip_path.name,
+                "pruefstatus": f"Fehler: {exc}",
+                "mitarbeiter": "",
+                "objektordner": "",
+                "wohnung": "",
+                "raum": "",
+                "schadensart": "",
+                "prioritaet": "",
+                "beschreibung": "",
+                "erstellt_am": "",
+                "fotoanzahl": 0,
+                "fotos": [],
+            })
+
+    return result
+
+
+def field_eingang_paket_kopieren(source: Path) -> Path:
+    field_eingang_verzeichnisse_sicherstellen()
+    target = FIELD_INBOX_DIR / source.name
+
+    if target.exists():
+        target = FIELD_INBOX_DIR / (
+            f"{source.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            f"{source.suffix}"
+        )
+
+    shutil.copy2(source, target)
+    return target
+
+
+def field_pruefaufgabe_erzeugen(item: dict[str, Any]) -> bool:
+    fields = SCHEMA.get("Aufgaben", [])
+    if not fields:
+        return False
+
+    row = ["" for _ in fields]
+    values = {
+        "Aufgabe": f'DBS Field prüfen: {item.get("dateiname", "")}',
+        "Titel": f'DBS Field prüfen: {item.get("dateiname", "")}',
+        "Objekt": item.get("objektordner", ""),
+        "Objektordner": item.get("objektordner", ""),
+        "Bereich": "DBS Field Import",
+        "Priorität": (
+            "Hoch"
+            if norm_key(item.get("prioritaet", "")) in {"hoch", "notfall"}
+            else "Normal"
+        ),
+        "Status": "Neu",
+        "Verantwortlich": item.get("mitarbeiter", "") or aktueller_mitarbeitername(),
+        "Notiz": (
+            f'Prüfstatus: {item.get("pruefstatus", "")}\n'
+            f'Schadensart: {item.get("schadensart", "")}\n'
+            f'Raum: {item.get("raum", "")}\n'
+            f'Fotos: {item.get("fotoanzahl", 0)}\n'
+            f'Datei: {item.get("zip_path", "")}'
+        ),
+    }
+
+    for index, field in enumerate(fields):
+        if field in values:
+            row[index] = values[field]
+
+    DATA.setdefault("Aufgaben", []).append(row)
+    speichere_tabelle("Aufgaben")
+    aktivitaet_protokollieren(
+        "DBS Field Eingang",
+        "Prüfaufgabe erzeugt",
+        beschreibung=item.get("dateiname", ""),
+    )
+    return True
+
+
+class DbsFieldEingangszentraleSeite(QWidget):
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.rows: list[dict[str, Any]] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(14)
+
+        title = QLabel("DBS Field Eingangszentrale")
+        title.setObjectName("pageTitle")
+        root.addWidget(title)
+
+        subtitle = QLabel(
+            "Mobile Schadenmeldungen sammeln, prüfen und gemeinsam importieren."
+        )
+        subtitle.setObjectName("subTitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        toolbar = QHBoxLayout()
+
+        add_files = QPushButton("ZIP-Pakete hinzufügen")
+        add_files.setObjectName("primaryButton")
+        add_files.clicked.connect(self.pakete_hinzufuegen)
+
+        refresh = QPushButton("Aktualisieren")
+        refresh.clicked.connect(self.laden)
+
+        open_folder = QPushButton("Eingangsordner öffnen")
+        open_folder.clicked.connect(
+            lambda: system_datei_oeffnen(str(FIELD_INBOX_DIR))
+        )
+
+        toolbar.addWidget(add_files)
+        toolbar.addWidget(refresh)
+        toolbar.addWidget(open_folder)
+        toolbar.addStretch()
+        root.addLayout(toolbar)
+
+        self.summary = QLabel("")
+        self.summary.setObjectName("metricTitle")
+        root.addWidget(self.summary)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(11)
+        self.table.setHorizontalHeaderLabels([
+            "Prüfstatus", "Datei", "Mitarbeiter", "Objektordner",
+            "Wohnung", "Raum", "Schadensart", "Priorität",
+            "Fotos", "Erstellt", "Beschreibung",
+        ])
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.table.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
+        self.table.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
+        root.addWidget(self.table, 1)
+
+        actions = QHBoxLayout()
+
+        import_selected = QPushButton("Auswahl importieren")
+        import_selected.setObjectName("primaryButton")
+        import_selected.clicked.connect(self.auswahl_importieren)
+
+        create_tasks = QPushButton("Prüfaufgaben erzeugen")
+        create_tasks.clicked.connect(self.pruefaufgaben_erzeugen)
+
+        single_import = QPushButton("Einzelimport öffnen")
+        single_import.clicked.connect(lambda: self.nav("DBS Field Import"))
+
+        actions.addWidget(import_selected)
+        actions.addWidget(create_tasks)
+        actions.addWidget(single_import)
+        actions.addStretch()
+        root.addLayout(actions)
+
+        self.laden()
+
+    def pakete_hinzufuegen(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "DBS-Field-Schadenpakete auswählen",
+            str(APP_DIR),
+            "ZIP-Dateien (*.zip)",
+        )
+
+        copied = 0
+        errors: list[str] = []
+
+        for value in paths:
+            try:
+                field_eingang_paket_kopieren(Path(value))
+                copied += 1
+            except OSError as exc:
+                errors.append(f"{Path(value).name}: {exc}")
+
+        self.laden()
+        message = f"{copied} Paket(e) hinzugefügt."
+        if errors:
+            message += "\n\nFehler:\n" + "\n".join(errors)
+        QMessageBox.information(self, "DBS Field Eingang", message)
+
+    def laden(self) -> None:
+        self.rows = field_eingangspakete_laden()
+        ready = sum(
+            1 for item in self.rows
+            if item.get("pruefstatus") == "Importbereit"
+        )
+        duplicates = sum(
+            1 for item in self.rows
+            if item.get("pruefstatus") == "Bereits importiert"
+        )
+
+        self.summary.setText(
+            f"{len(self.rows)} Paket(e) · "
+            f"{ready} importbereit · "
+            f"{duplicates} bereits importiert"
+        )
+
+        self.table.setRowCount(len(self.rows))
+        keys = [
+            "pruefstatus", "dateiname", "mitarbeiter", "objektordner",
+            "wohnung", "raum", "schadensart", "prioritaet",
+            "fotoanzahl", "erstellt_am", "beschreibung",
+        ]
+
+        for row_index, item in enumerate(self.rows):
+            for column_index, key in enumerate(keys):
+                self.table.setItem(
+                    row_index,
+                    column_index,
+                    QTableWidgetItem(str(item.get(key, ""))),
+                )
+
+        widths = [170, 260, 130, 240, 120, 140, 190, 110, 70, 170, 520]
+        for index, width in enumerate(widths):
+            self.table.setColumnWidth(index, width)
+
+    def _selected_items(self) -> list[dict[str, Any]]:
+        rows = sorted({
+            index.row()
+            for index in self.table.selectionModel().selectedRows()
+        })
+        return [
+            self.rows[index]
+            for index in rows
+            if 0 <= index < len(self.rows)
+        ]
+
+    def auswahl_importieren(self) -> None:
+        items = self._selected_items()
+        if not items:
+            QMessageBox.information(
+                self,
+                "DBS Field Eingang",
+                "Bitte mindestens ein Paket auswählen.",
+            )
+            return
+
+        imported = 0
+        errors: list[str] = []
+
+        for item in items:
+            if item.get("pruefstatus") != "Importbereit":
+                errors.append(
+                    f'{item.get("dateiname", "")}: '
+                    f'{item.get("pruefstatus", "")}'
+                )
+                continue
+
+            try:
+                field_schaden_importieren(item)
+                imported += 1
+            except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+                errors.append(f'{item.get("dateiname", "")}: {exc}')
+
+        self.laden()
+        message = f"{imported} Schadenmeldung(en) importiert."
+        if errors:
+            message += "\n\nNicht importiert:\n" + "\n".join(errors)
+        QMessageBox.information(self, "DBS Field Eingang", message)
+
+    def pruefaufgaben_erzeugen(self) -> None:
+        items = self._selected_items()
+        if not items:
+            QMessageBox.information(
+                self,
+                "DBS Field Eingang",
+                "Bitte mindestens ein Paket auswählen.",
+            )
+            return
+
+        created = sum(
+            1 for item in items
+            if field_pruefaufgabe_erzeugen(item)
+        )
+        QMessageBox.information(
+            self,
+            "DBS Field Eingang",
+            f"{created} Prüfaufgabe(n) erzeugt.",
+        )
+
+
+
+def schadenleitstand_rows() -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for index, row in enumerate(DATA.get("Schäden", [])):
+        prio = feldwert("Schäden", row, ["Priorität", "Dringlichkeit"]) or "Niedrig"
+        status = feldwert("Schäden", row, ["Status"]) or "Gemeldet"
+        key = norm_key(prio)
+        ampel = "🔴" if key == "notfall" else "🟠" if key == "hoch" else "🟡" if key == "mittel" else "🟢"
+        result.append({
+            "index": index,
+            "ampel": ampel,
+            "prioritaet": prio,
+            "status": status,
+            "objekt": objektordner_fuer_datensatz("Schäden", row),
+            "wohnung": feldwert("Schäden", row, ["Wohnung"]),
+            "raum": feldwert("Schäden", row, ["Raum", "Bereich"]),
+            "art": feldwert("Schäden", row, ["Schadensart", "Kategorie", "Art"]),
+            "beschreibung": feldwert("Schäden", row, ["Beschreibung", "Schaden", "Notiz"]),
+            "datum": feldwert("Schäden", row, ["Datum", "Erstellt am"]),
+            "mitarbeiter": feldwert("Schäden", row, ["Mitarbeiter", "Verantwortlich"]),
+            "fotos": feldwert("Schäden", row, ["Fotos", "Foto", "Datei"]),
+        })
+    return result
+
+
+def schadenleitstand_status_setzen(index: int, status: str) -> bool:
+    rows = DATA.get("Schäden", [])
+    fields = SCHEMA.get("Schäden", [])
+    if not 0 <= index < len(rows) or "Status" not in fields:
+        return False
+    col = fields.index("Status")
+    while len(rows[index]) <= col:
+        rows[index].append("")
+    rows[index][col] = status
+    speichere_tabelle("Schäden")
+    aktivitaet_protokollieren("Schadenleitstand", "Status geändert", status=status)
+    return True
+
+
+class SchadenleitstandProSeite(QWidget):
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.rows: list[dict[str, Any]] = []
+        self.filtered: list[dict[str, Any]] = []
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(12)
+
+        title = QLabel("Schadenleitstand PRO")
+        title.setObjectName("pageTitle")
+        root.addWidget(title)
+
+        sub = QLabel("Alle Schäden zentral suchen, priorisieren und bearbeiten.")
+        sub.setObjectName("subTitle")
+        root.addWidget(sub)
+
+        bar = QHBoxLayout()
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Objekt, Wohnung, Raum, Schaden oder Mitarbeiter suchen ...")
+        self.search.textChanged.connect(self.filtern)
+        self.status = QComboBox()
+        self.status.addItems(["Alle Status", "Gemeldet", "In Bearbeitung", "Beauftragt", "Erledigt"])
+        self.status.currentTextChanged.connect(self.filtern)
+        refresh = QPushButton("Aktualisieren")
+        refresh.setObjectName("primaryButton")
+        refresh.clicked.connect(self.laden)
+        bar.addWidget(self.search, 1)
+        bar.addWidget(self.status)
+        bar.addWidget(refresh)
+        root.addLayout(bar)
+
+        self.info = QLabel("")
+        self.info.setObjectName("metricTitle")
+        root.addWidget(self.info)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(10)
+        self.table.setHorizontalHeaderLabels([
+            "Priorität", "Status", "Objektordner", "Wohnung", "Raum",
+            "Schadensart", "Beschreibung", "Datum", "Mitarbeiter", "Fotos"
+        ])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.table.cellDoubleClicked.connect(self.oeffnen)
+        root.addWidget(self.table, 1)
+
+        actions = QHBoxLayout()
+        for label, value in [
+            ("In Bearbeitung", "In Bearbeitung"),
+            ("Beauftragt", "Beauftragt"),
+            ("Erledigt", "Erledigt"),
+        ]:
+            button = QPushButton(label)
+            button.clicked.connect(lambda checked=False, s=value: self.status_setzen(s))
+            actions.addWidget(button)
+        object_button = QPushButton("Objektordner öffnen")
+        object_button.clicked.connect(self.objekt_oeffnen)
+        actions.addWidget(object_button)
+        actions.addStretch()
+        root.addLayout(actions)
+        self.laden()
+
+    def laden(self) -> None:
+        self.rows = schadenleitstand_rows()
+        self.filtern()
+
+    def filtern(self) -> None:
+        query = norm_key(self.search.text())
+        selected = self.status.currentText()
+        self.filtered = []
+        for item in self.rows:
+            haystack = norm_key(" | ".join(str(item.get(k, "")) for k in [
+                "objekt", "wohnung", "raum", "art", "beschreibung", "mitarbeiter"
+            ]))
+            if query and query not in haystack:
+                continue
+            if selected != "Alle Status" and norm_key(item["status"]) != norm_key(selected):
+                continue
+            self.filtered.append(item)
+
+        open_count = sum(1 for item in self.rows if norm_key(item["status"]) not in {"erledigt", "geschlossen"})
+        urgent = sum(1 for item in self.rows if norm_key(item["prioritaet"]) in {"hoch", "notfall"} and norm_key(item["status"]) != "erledigt")
+        self.info.setText(f"{len(self.rows)} Schäden · {open_count} offen · {urgent} dringend")
+        self.table.setRowCount(len(self.filtered))
+
+        for r, item in enumerate(self.filtered):
+            values = [
+                f'{item["ampel"]} {item["prioritaet"]}', item["status"], item["objekt"],
+                item["wohnung"], item["raum"], item["art"], item["beschreibung"],
+                item["datum"], item["mitarbeiter"], item["fotos"]
+            ]
+            for c, value in enumerate(values):
+                self.table.setItem(r, c, QTableWidgetItem(str(value)))
+        for c, width in enumerate([120, 150, 240, 120, 130, 180, 520, 120, 140, 420]):
+            self.table.setColumnWidth(c, width)
+
+    def _item(self) -> dict[str, Any] | None:
+        row = self.table.currentRow()
+        return self.filtered[row] if 0 <= row < len(self.filtered) else None
+
+    def status_setzen(self, status: str) -> None:
+        item = self._item()
+        if item is None:
+            QMessageBox.information(self, "Schadenleitstand", "Bitte einen Schaden auswählen.")
+            return
+        if schadenleitstand_status_setzen(int(item["index"]), status):
+            self.laden()
+
+    def objekt_oeffnen(self) -> None:
+        item = self._item()
+        if item is None:
+            return
+        folder = normalisiere_gueltigen_objektordner(item["objekt"])
+        if not folder:
+            QMessageBox.warning(self, "Objektordner", "Objektordner nicht gefunden.")
+            return
+        path = Path(folder)
+        if not path.is_absolute():
+            path = DOKUMENTE_DIR / path
+        system_datei_oeffnen(str(path))
+
+    def oeffnen(self, row: int, column: int) -> None:
+        if 0 <= row < len(self.filtered) and column == 9:
+            first = str(self.filtered[row].get("fotos", "")).split("|")[0].strip()
+            if first:
+                system_datei_oeffnen(first)
+                return
+        self.objekt_oeffnen()
+
+
+
+def dbs_field_json_lesen(path: Path) -> dict[str, Any]:
+    if not path.exists() or path.suffix.lower() != ".json":
+        raise ValueError("Bitte eine gültige JSON-Datei auswählen.")
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"JSON-Datei konnte nicht gelesen werden: {exc}") from exc
+
+    # Manche Mailprogramme verpacken den eigentlichen Inhalt als JSON-String.
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise ValueError("Die Datei enthält nur Text, aber kein DBS-Field-JSON.") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("Die Datei enthält kein gültiges JSON-Objekt.")
+
+    payload["_datei"] = str(path)
+    return payload
+
+
+def dbs_field_typ_normalisieren(value: Any) -> str:
+    compact = norm_key(value)
+    aliases = {
+        "stundennachweisemehrtag": "stundennachweise_mehrtag",
+        "stundennachweismehrtag": "stundennachweise_mehrtag",
+        "mehrtagstundennachweise": "stundennachweise_mehrtag",
+        "zeiterfassung": "stundennachweise_mehrtag",
+        "timesheets": "stundennachweise_mehrtag",
+        "terminplaner": "terminplaner",
+        "termine": "terminplaner",
+        "appointments": "terminplaner",
+        "kalender": "terminplaner",
+    }
+    return aliases.get(compact, compact)
+
+
+def dbs_field_liste_finden(payload: dict[str, Any], typ: str) -> tuple[list[Any], str]:
+    keys = (
+        ["eintraege", "einträge", "entries", "daten", "stundennachweise", "timesheets"]
+        if typ == "stundennachweise_mehrtag"
+        else ["termine", "appointments", "entries", "daten", "kalender"]
+    )
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value, key
+        if isinstance(value, str) and value.strip():
+            try:
+                decoded = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(decoded, list):
+                return decoded, key
+    return [], ""
+
+
+def dbs_field_objektordner_pruefen(value: str) -> tuple[str, str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return "", "Objektordner fehlt"
+    folder = normalisiere_gueltigen_objektordner(raw)
+    if folder:
+        return folder, ""
+    # Außendienstwerte dürfen importiert werden, auch wenn der Ordner lokal
+    # noch nicht angelegt oder anders benannt ist. So gehen keine Daten verloren.
+    return raw, f"Objektordner nicht lokal zugeordnet: {raw}"
+
+
+def dbs_field_signatur(entry: dict[str, Any], typ: str) -> str:
+    if typ == "stundennachweise_mehrtag":
+        parts = [
+            entry.get("id", ""), entry.get("mitarbeiter", ""),
+            entry.get("datum", ""), entry.get("objektordner", ""),
+            entry.get("taetigkeit", entry.get("tätigkeit", "")),
+            entry.get("beginn", ""), entry.get("ende", ""),
+            entry.get("pause", ""), entry.get("stunden", ""),
+        ]
+    else:
+        parts = [
+            entry.get("id", ""), entry.get("titel", ""),
+            entry.get("datum", ""), entry.get("beginn", ""),
+            entry.get("ende", ""), entry.get("objektordner", ""),
+            entry.get("ort", ""),
+        ]
+    return "|".join(str(value).strip().casefold() for value in parts)
+
+
+def dbs_field_bestehende_signaturen(target: str, typ: str) -> set[str]:
+    fields = SCHEMA.get(target, [])
+    signatures: set[str] = set()
+
+    def field_value(row: list[Any], names: list[str]) -> Any:
+        for name in names:
+            if name in fields:
+                index = fields.index(name)
+                if index < len(row):
+                    return row[index]
+        return ""
+
+    for row in DATA.get(target, []):
+        if not isinstance(row, list):
+            continue
+        if typ == "stundennachweise_mehrtag":
+            entry = {
+                "id": field_value(row, ["ID"]),
+                "mitarbeiter": field_value(row, ["Mitarbeiter"]),
+                "datum": field_value(row, ["Datum"]),
+                "objektordner": field_value(row, ["Objektordner", "Objekt"]),
+                "taetigkeit": field_value(row, ["Tätigkeit", "Taetigkeit"]),
+                "beginn": field_value(row, ["Beginn"]),
+                "ende": field_value(row, ["Ende"]),
+                "pause": field_value(row, ["Pause"]),
+                "stunden": field_value(row, ["Stunden"]),
+            }
+        else:
+            entry = {
+                "id": field_value(row, ["ID"]),
+                "titel": field_value(row, ["Titel", "Termin"]),
+                "datum": field_value(row, ["Datum"]),
+                "beginn": field_value(row, ["Beginn"]),
+                "ende": field_value(row, ["Ende"]),
+                "objektordner": field_value(row, ["Objektordner", "Objekt"]),
+                "ort": field_value(row, ["Ort"]),
+            }
+        signatures.add(dbs_field_signatur(entry, typ))
+    return signatures
+
+
+def dbs_field_import_pruefen(payload: dict[str, Any]) -> dict[str, Any]:
+    typ_raw = payload.get("typ", payload.get("type", payload.get("art", "")))
+    typ = dbs_field_typ_normalisieren(typ_raw)
+
+    if typ == "stundennachweise_mehrtag":
+        target = "Stundennachweise" if "Stundennachweise" in SCHEMA else "Zeiterfassung"
+    elif typ == "terminplaner":
+        target = "Termine" if "Termine" in SCHEMA else "Kalender"
+    else:
+        raise ValueError(
+            f"Unbekannter DBS-Field-Dateityp: {typ_raw!r}. "
+            "Erwartet werden Stundennachweise oder Terminplaner."
+        )
+
+    entries, source_key = dbs_field_liste_finden(payload, typ)
+    if not source_key:
+        available = ", ".join(sorted(str(key) for key in payload.keys() if not str(key).startswith("_")))
+        raise ValueError(
+            "Keine Datensatzliste gefunden. Vorhandene JSON-Felder: "
+            f"{available or 'keine'}."
+        )
+    if not SCHEMA.get(target):
+        raise ValueError(f"Die Zieltabelle „{target}“ wurde nicht gefunden.")
+
+    existing = dbs_field_bestehende_signaturen(target, typ)
+    current: set[str] = set()
+    valid: list[dict[str, Any]] = []
+    duplicates: list[dict[str, Any]] = []
+    invalid: list[tuple[dict[str, Any], str]] = []
+    warnings: list[tuple[dict[str, Any], str]] = []
+
+    for raw in entries:
+        if not isinstance(raw, dict):
+            invalid.append(({"wert": raw}, "Datensatz ist kein JSON-Objekt"))
+            continue
+        entry = dict(raw)
+        if typ == "stundennachweise_mehrtag":
+            entry["taetigkeit"] = entry.get("taetigkeit", entry.get("tätigkeit", entry.get("activity", "")))
+            entry["mitarbeiter"] = entry.get("mitarbeiter", entry.get("employee", ""))
+            entry["datum"] = entry.get("datum", entry.get("date", ""))
+            entry["beginn"] = entry.get("beginn", entry.get("start", ""))
+            entry["ende"] = entry.get("ende", entry.get("end", ""))
+            entry["objektordner"] = entry.get("objektordner", entry.get("objekt", entry.get("property", "")))
+            if not str(entry.get("datum", "")).strip():
+                invalid.append((entry, "Datum fehlt")); continue
+            if not str(entry.get("beginn", "")).strip() or not str(entry.get("ende", "")).strip():
+                invalid.append((entry, "Beginn oder Ende fehlt")); continue
+            folder, warning = dbs_field_objektordner_pruefen(entry.get("objektordner", ""))
+            entry["objektordner"] = folder
+            if warning:
+                warnings.append((entry, warning))
+        else:
+            entry["id"] = entry.get("id", entry.get("termin_id", entry.get("appointment_id", "")))
+            entry["titel"] = entry.get("titel", entry.get("title", entry.get("termin", entry.get("subject", ""))))
+            entry["datum"] = entry.get("datum", entry.get("date", entry.get("start_date", "")))
+            entry["beginn"] = entry.get("beginn", entry.get("start", entry.get("start_time", "")))
+            entry["ende"] = entry.get("ende", entry.get("end", entry.get("end_time", "")))
+            entry["ort"] = entry.get("ort", entry.get("location", entry.get("adresse", "")))
+            entry["notiz"] = entry.get(
+                "notiz",
+                entry.get("note", entry.get("beschreibung", entry.get("description", ""))),
+            )
+            entry["status"] = entry.get("status", entry.get("state", "Geplant"))
+            entry["objektordner"] = entry.get(
+                "objektordner",
+                entry.get("objekt", entry.get("property", entry.get("property_folder", ""))),
+            )
+            if not str(entry.get("titel", "")).strip() or not str(entry.get("datum", "")).strip():
+                invalid.append((entry, "Titel oder Datum fehlt")); continue
+            if str(entry.get("objektordner", "")).strip():
+                folder, warning = dbs_field_objektordner_pruefen(entry["objektordner"])
+                entry["objektordner"] = folder
+                if warning:
+                    warnings.append((entry, warning))
+
+        signature = dbs_field_signatur(entry, typ)
+        if signature in existing or signature in current:
+            duplicates.append(entry)
+            continue
+        current.add(signature)
+        valid.append(entry)
+
+    return {
+        "typ": typ, "typ_raw": str(typ_raw), "source_key": source_key,
+        "target": target, "valid": valid, "duplicates": duplicates,
+        "invalid": invalid, "warnings": warnings, "total": len(entries),
+        "reported_total": payload.get("anzahl", payload.get("count", "")),
+    }
+
+
+def dbs_field_zeiteintrag_zeile(
+    entry: dict[str, Any],
+    fields: list[str],
+) -> list[Any]:
+    objekt = str(entry.get("objektordner", "")).strip()
+    values = {
+        "Mitarbeiter": entry.get("mitarbeiter", ""),
+        "Datum": entry.get("datum", ""),
+        "Objekt": objekt,
+        "Objektordner": objekt,
+        "Tätigkeit": entry.get("taetigkeit", ""),
+        "Taetigkeit": entry.get("taetigkeit", ""),
+        "Beginn": entry.get("beginn", ""),
+        "Ende": entry.get("ende", ""),
+        "Pause": entry.get("pause", ""),
+        "Stunden": entry.get("stunden", ""),
+        "Notiz": entry.get("notiz", ""),
+        "Status": entry.get("status", "Eingereicht"),
+        "ID": entry.get("id", ""),
+    }
+    return [values.get(field, "") for field in fields]
+
+
+def dbs_field_termin_zeile(
+    entry: dict[str, Any],
+    fields: list[str],
+) -> list[Any]:
+    objekt = str(entry.get("objektordner", "")).strip()
+    values = {
+        "Titel": entry.get("titel", ""),
+        "Termin": entry.get("titel", ""),
+        "Datum": entry.get("datum", ""),
+        "Beginn": entry.get("beginn", ""),
+        "Ende": entry.get("ende", ""),
+        "Objekt": objekt,
+        "Objektordner": objekt,
+        "Ort": entry.get("ort", ""),
+        "Notiz": entry.get("notiz", ""),
+        "Status": entry.get("status", "Geplant"),
+        "ID": entry.get("id", ""),
+    }
+    return [values.get(field, "") for field in fields]
+
+
+def dbs_field_importprotokoll_speichern(
+    payload: dict[str, Any],
+    result: dict[str, Any],
+    backup: Path | None,
+) -> Path:
+    log_dir = EXPORT_DIR / "dbs_field_importprotokolle"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_path = log_dir / f"dbs_field_import_{timestamp}.json"
+
+    log_payload = {
+        "zeitpunkt": datetime.now().isoformat(timespec="seconds"),
+        "quelldatei": payload.get("_datei", ""),
+        "typ": result["typ"],
+        "zieltabelle": result["target"],
+        "gesamt": result["total"],
+        "importiert": len(result["valid"]),
+        "dubletten": len(result["duplicates"]),
+        "ungueltig": len(result["invalid"]),
+        "backup": str(backup) if backup else "",
+        "ungueltige_eintraege": [
+            {"eintrag": entry, "grund": reason}
+            for entry, reason in result["invalid"]
+        ],
+    }
+    log_path.write_text(
+        json.dumps(log_payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return log_path
+
+
+def dbs_field_json_importieren(
+    payload: dict[str, Any],
+) -> tuple[str, int, int, int, Path | None, Path]:
+    result = dbs_field_import_pruefen(payload)
+    target = result["target"]
+    fields = SCHEMA[target]
+
+    backup = erstelle_schnellbackup()
+
+    if result["typ"] == "stundennachweise_mehrtag":
+        rows = [
+            dbs_field_zeiteintrag_zeile(item, fields)
+            for item in result["valid"]
+        ]
+    else:
+        rows = [
+            dbs_field_termin_zeile(item, fields)
+            for item in result["valid"]
+        ]
+
+    if rows:
+        DATA.setdefault(target, []).extend(rows)
+        speichere_tabelle(target)
+
+    log_path = dbs_field_importprotokoll_speichern(
+        payload,
+        result,
+        backup,
+    )
+
+    aktivitaet_protokollieren(
+        "DBS Field Datenimport",
+        "Sicherer Import abgeschlossen",
+        beschreibung=(
+            f"{len(rows)} importiert, "
+            f"{len(result['duplicates'])} Dubletten, "
+            f"{len(result['invalid'])} ungültig"
+        ),
+        status="Importiert",
+    )
+
+    return (
+        target,
+        len(rows),
+        len(result["duplicates"]),
+        len(result["invalid"]),
+        backup,
+        log_path,
+    )
+
+
+class DbsFieldDatenimportSeite(QWidget):
+    def __init__(self, nav):
+        super().__init__()
+        self.nav = nav
+        self.payload: dict[str, Any] | None = None
+        self.check_result: dict[str, Any] | None = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(14)
+
+        title = QLabel("DBS Field Datenimport 7.4")
+        title.setObjectName("pageTitle")
+        root.addWidget(title)
+
+        subtitle = QLabel(
+            "Importiert Stundennachweise und Kalendertermine mit "
+            "Objektordnerprüfung, Dublettenfilter, Backup und Importprotokoll."
+        )
+        subtitle.setObjectName("subTitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        bar = QHBoxLayout()
+        self.path_input = QLineEdit()
+        self.path_input.setPlaceholderText(
+            "JSON-Datei aus DBS Field auswählen ..."
+        )
+
+        choose = QPushButton("JSON auswählen")
+        choose.setObjectName("primaryButton")
+        choose.clicked.connect(self.datei_waehlen)
+
+        check = QPushButton("Datei prüfen")
+        check.clicked.connect(self.pruefen)
+
+        bar.addWidget(self.path_input, 1)
+        bar.addWidget(choose)
+        bar.addWidget(check)
+        root.addLayout(bar)
+
+        summary = QHBoxLayout()
+        self.total_label = QLabel("Gesamt: 0")
+        self.valid_label = QLabel("Importierbar: 0")
+        self.duplicate_label = QLabel("Dubletten: 0")
+        self.invalid_label = QLabel("Ungültig: 0")
+
+        for label in [
+            self.total_label,
+            self.valid_label,
+            self.duplicate_label,
+            self.invalid_label,
+        ]:
+            label.setStyleSheet(
+                "background:#f5f8fc; border:1px solid #dce5f0; "
+                "border-radius:10px; padding:10px; font-weight:600;"
+            )
+            summary.addWidget(label)
+
+        root.addLayout(summary)
+
+        self.info = QLabel("Noch keine Datei geprüft.")
+        self.info.setWordWrap(True)
+        self.info.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        root.addWidget(self.info)
+
+        self.table = QTableWidget()
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(False)
+        self.table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+        )
+        root.addWidget(self.table, 1)
+
+        actions = QHBoxLayout()
+
+        import_button = QPushButton(
+            "Backup erstellen und gültige Daten importieren"
+        )
+        import_button.setObjectName("primaryButton")
+        import_button.clicked.connect(self.importieren)
+
+        protocol_button = QPushButton("Importprotokolle öffnen")
+        protocol_button.clicked.connect(self.protokolle_oeffnen)
+
+        actions.addWidget(import_button)
+        actions.addWidget(protocol_button)
+        actions.addStretch()
+        root.addLayout(actions)
+
+    def datei_waehlen(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "DBS-Field-JSON auswählen",
+            str(APP_DIR),
+            "JSON-Dateien (*.json)",
+        )
+        if path:
+            self.path_input.setText(path)
+            self.pruefen()
+
+    def pruefen(self) -> None:
+        try:
+            self.payload = dbs_field_json_lesen(
+                Path(self.path_input.text().strip())
+            )
+            self.check_result = dbs_field_import_pruefen(self.payload)
+        except ValueError as exc:
+            self.payload = None
+            self.check_result = None
+            QMessageBox.warning(
+                self,
+                "DBS Field Datenimport",
+                str(exc),
+            )
+            return
+
+        result = self.check_result
+        self.total_label.setText(f"Gesamt: {result['total']}")
+        self.valid_label.setText(
+            f"Importierbar: {len(result['valid'])}"
+        )
+        self.duplicate_label.setText(
+            f"Dubletten: {len(result['duplicates'])}"
+        )
+        self.invalid_label.setText(
+            f"Ungültig: {len(result['invalid'])}"
+        )
+
+        label = (
+            "Mehrtag-Stundennachweise"
+            if result["typ"] == "stundennachweise_mehrtag"
+            else "Terminplaner"
+        )
+        self.info.setText(
+            f"<b>Dateityp:</b> {label}<br>"
+            f"<b>Erkannter Typ:</b> {result['typ']} (Original: {result['typ_raw']})<br>"
+            f"<b>Datenfeld:</b> {result['source_key']}<br>"
+            f"<b>Zieltabelle:</b> {result['target']}<br>"
+            f"<b>Datei:</b> {self.payload.get('_datei', '')}<br>"
+            "Grün = importierbar, Gelb = Dublette, Rot = ungültig."
+        )
+
+        if result["typ"] == "stundennachweise_mehrtag":
+            headers = [
+                "Prüfung", "Mitarbeiter", "Datum", "Objektordner",
+                "Tätigkeit", "Beginn", "Ende", "Pause", "Stunden",
+                "Notiz",
+            ]
+            keys = [
+                "mitarbeiter", "datum", "objektordner", "taetigkeit",
+                "beginn", "ende", "pause", "stunden", "notiz",
+            ]
+        else:
+            headers = [
+                "Prüfung", "Titel", "Datum", "Beginn", "Ende",
+                "Objektordner / Ort", "Notiz", "Status",
+            ]
+            keys = [
+                "titel", "datum", "beginn", "ende",
+                "objektordner", "notiz", "status",
+            ]
+
+        rows: list[tuple[str, dict[str, Any]]] = []
+        rows.extend(("Importierbar", item) for item in result["valid"])
+        rows.extend(("Dublette", item) for item in result["duplicates"])
+        rows.extend(
+            (f"Ungültig: {reason}", item)
+            for item, reason in result["invalid"]
+        )
+
+        self.table.setColumnCount(len(headers))
+        self.table.setHorizontalHeaderLabels(headers)
+        self.table.setRowCount(len(rows))
+
+        for row_index, (status, item) in enumerate(rows):
+            self.table.setItem(
+                row_index,
+                0,
+                QTableWidgetItem(status),
+            )
+            for column_index, key in enumerate(keys, start=1):
+                self.table.setItem(
+                    row_index,
+                    column_index,
+                    QTableWidgetItem(str(item.get(key, ""))),
+                )
+
+        self.table.setColumnWidth(0, 250)
+        for column in range(1, len(headers)):
+            self.table.setColumnWidth(column, 165)
+
+    def importieren(self) -> None:
+        if self.payload is None or self.check_result is None:
+            QMessageBox.information(
+                self,
+                "DBS Field Datenimport",
+                "Bitte zuerst eine JSON-Datei prüfen.",
+            )
+            return
+
+        import_count = len(self.check_result["valid"])
+        if import_count == 0:
+            QMessageBox.information(
+                self,
+                "DBS Field Datenimport",
+                "Es wurden keine neuen gültigen Einträge gefunden.",
+            )
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "DBS Field Datenimport",
+            (
+                f"{import_count} neue Einträge werden importiert.\n"
+                "Vorher wird automatisch ein vollständiges Backup erstellt.\n\n"
+                "Import jetzt starten?"
+            ),
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            (
+                target,
+                imported,
+                duplicates,
+                invalid,
+                backup,
+                log_path,
+            ) = dbs_field_json_importieren(self.payload)
+        except (OSError, ValueError, KeyError) as exc:
+            QMessageBox.warning(
+                self,
+                "DBS Field Datenimport",
+                f"Import fehlgeschlagen:\n{exc}",
+            )
+            return
+
+        backup_text = str(backup) if backup else "Backup nicht erstellt"
+        QMessageBox.information(
+            self,
+            "DBS Field Datenimport",
+            (
+                f"Zieltabelle: {target}\n"
+                f"Importiert: {imported}\n"
+                f"Dubletten übersprungen: {duplicates}\n"
+                f"Ungültige Einträge: {invalid}\n\n"
+                f"Backup: {backup_text}\n"
+                f"Protokoll: {log_path}"
+            ),
+        )
+        self.pruefen()
+
+    def protokolle_oeffnen(self) -> None:
+        path = EXPORT_DIR / "dbs_field_importprotokolle"
+        path.mkdir(parents=True, exist_ok=True)
+        system_datei_oeffnen(str(path))
+
+class DbsFieldKalenderimportSeite(DbsFieldDatenimportSeite):
+    """Eigene Importseite ausschließlich für Termine aus DBS Field."""
+
+    def __init__(self, nav):
+        super().__init__(nav)
+
+        title_labels = self.findChildren(QLabel, "pageTitle")
+        if title_labels:
+            title_labels[0].setText("DBS Field Kalenderimport 7.4")
+
+        subtitle_labels = self.findChildren(QLabel, "subTitle")
+        if subtitle_labels:
+            subtitle_labels[0].setText(
+                "Importiert Termine aus DBS Field direkt in die Tabelle "
+                "„Termine“. "
+                "Stundennachweis-Dateien werden auf dieser Seite abgewiesen."
+            )
+
+        self.path_input.setPlaceholderText(
+            "Termin-JSON aus DBS Field auswählen ..."
+        )
+
+    def pruefen(self) -> None:
+        super().pruefen()
+
+        if self.check_result is None:
+            return
+
+        if self.check_result.get("typ") != "terminplaner":
+            self.payload = None
+            self.check_result = None
+            self.table.setRowCount(0)
+            self.total_label.setText("Gesamt: 0")
+            self.valid_label.setText("Importierbar: 0")
+            self.duplicate_label.setText("Dubletten: 0")
+            self.invalid_label.setText("Ungültig: 0")
+            self.info.setText(
+                "Die ausgewählte Datei enthält keine Kalendertermine."
+            )
+            QMessageBox.warning(
+                self,
+                "DBS Field Kalenderimport",
+                "Diese Seite akzeptiert ausschließlich Termin-JSON-Dateien "
+                "aus dem DBS-Field-Terminplaner."
+            )
+            return
+
+        self.info.setText(
+            self.info.text()
+            + "<br><b>Kalenderimport:</b> Datei wurde als Terminplaner erkannt."
+        )
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -10814,7 +15731,12 @@ class MainWindow(QMainWindow):
         self.add_page("Smart Startseite", SmartStartseiteSeite(self.navigate))
         self.add_page("Objektgalerie", ObjektGalerieSeite(self.navigate))
         self.add_page("Enterprise Objekt 360°", EnterpriseObjekt360Seite(self.navigate))
+        self.add_page("Digitaler Gebäudezwilling", DigitalerGebaeudezwillingSeite(self.navigate))
+        self.add_page("Enterprise Assistant", EnterpriseAssistentSeite(self.navigate))
+        self.add_page("Projektmonitor", ProjektmonitorSeite(self.navigate))
+        self.add_page("Dokumentenvorschau", DokumentVorschauSeite(self.navigate))
         self.add_page("Dokumenten-Center 2.0", DokumentenCenter2Seite(self.navigate))
+        self.add_page("Dokumentenautomatisierung PRO", DokumentenautomatisierungProSeite(self.navigate))
         self.add_page("Workflow-Regeln PRO", WorkflowRegelnProSeite(self.navigate))
         self.add_page("Verwaltungsleitstand 5.0", VerwaltungsleitstandSeite(self.navigate))
         self.add_page("Berichte & Export PRO", BerichteExportProSeite(self.navigate))
@@ -10827,6 +15749,11 @@ class MainWindow(QMainWindow):
         self.add_page("Fristenmanager PRO", FristenmanagerProSeite(self.navigate))
         self.add_page("Workflow-Center PRO", WorkflowCenterSeite(self.navigate))
         self.add_page("Mein Arbeitstag", MitarbeiterStartcenterSeite(self.navigate))
+        self.add_page("DBS Field Import", DbsFieldImportSeite(self.navigate))
+        self.add_page("DBS Field Eingangszentrale", DbsFieldEingangszentraleSeite(self.navigate))
+        self.add_page("DBS Field Datenimport", DbsFieldDatenimportSeite(self.navigate))
+        self.add_page("DBS Field Kalenderimport", DbsFieldKalenderimportSeite(self.navigate))
+        self.add_page("Schadenleitstand PRO", SchadenleitstandProSeite(self.navigate))
         self.add_page("Kalender & Planung", KalenderPlanungSeite(self.navigate))
         self.add_page("Jahresprüfung PRO", JahrespruefungProSeite(self.navigate))
         self.add_page("Einstellungen", EinstellungenSeite(self.navigate))
@@ -10846,31 +15773,49 @@ class MainWindow(QMainWindow):
         for title in SCHEMA.keys():
             self.add_page(title, TabellenSeite(title))
 
+        # Version 11.0a: aufgeräumte Navigation. Technische Altseiten bleiben im
+        # Programm registriert, damit bestehende interne Verknüpfungen weiterhin
+        # funktionieren. Aus der Seitenleiste werden nur redundante Einstiege entfernt.
+        # Der produktive DBS-Field-App-Import ist ausdrücklich geschützt und vollständig sichtbar.
         nav_groups = [
             ("START", [
-                "Smart Startseite", "Dashboard", "Verwaltungsleitstand 5.0",
-                "Mein Arbeitstag", "Kalender & Planung",
+                "Smart Startseite", "Verwaltungsleitstand 5.0",
+                "Mein Arbeitstag", "Kalender & Planung", "Termine",
             ]),
-            ("VERWALTUNG", [
+            ("OBJEKTE & VERMIETUNG", [
                 "Objekte", "Wohnungen", "Mieter", "Mietverträge",
-                "Objektgalerie", "Enterprise Objekt 360°", "Smart Objektakte", "Objektchronik",
+                "Enterprise Objekt 360°", "Digitaler Gebäudezwilling", "Objektchronik",
+                "Wohnungsgeberauskunft", "Übergabeprotokolle",
+                "Schlüssel", "Schäden",
             ]),
             ("FINANZEN", [
-                "Rechnungen", "Betriebskosten", "Buchhaltung",
-                "Kontoauszug-Import", "Mietkonto-Abgleich",
-                "Zahlungsabgleich PRO", "Belegscanner PRO",
+                "Zahlungen", "Zahlungsprüfung", "Mahnwesen",
+                "Rechnungen", "HV-Rechnungen", "Betriebskosten",
+                "BK-Automatik", "Buchhaltung", "Kontoauszug-Import",
+                "Mietkonto-Abgleich", "Zahlungsabgleich PRO",
+                "Belegscanner PRO", "Grundsteuer", "Versicherungen",
             ]),
-            ("ORGANISATION", [
-                "Arbeitsorganisation PRO", "Fristenmanager PRO",
-                "Workflow-Center PRO", "Jahresprüfung PRO",
-                "Dokumente", "Dokumenten-Center 2.0", "Akten-Center", "Globale Suche", "Workflow-Regeln PRO",
+            ("DOKUMENTE & ORGANISATION", [
+                "Dokumenten-Center 2.0", "Dokumente", "Akten-Center",
+                "Arbeitsorganisation PRO", "Aufgaben", "Fristen",
+                "Jahresprüfung PRO", "Globale Suche",
+            ]),
+            ("PERSONAL", [
+                "Mitarbeiter", "Stundennachweise", "Mitarbeiter-Login",
+                "Berechtigungen & Protokoll",
+            ]),
+            ("APP-IMPORT · PRODUKTIV", [
+                "DBS Field Import", "DBS Field Eingangszentrale",
+                "DBS Field Datenimport", "DBS Field Kalenderimport",
+            ]),
+            ("WEITERE VERWALTUNG", [
+                "Dienstleister", "Versorger", "Wichtige Verträge",
+                "Vermieterauskunft", "Brand- und Arbeitsschutz",
+                "E-Mail", "Aktenstruktur", "Ereignisprotokoll",
             ]),
             ("AUSWERTUNG & SYSTEM", [
-                "Verwaltungs-Cockpit", "Objekt-Cockpit",
-                "Berichte & Export PRO", "Analyse-Center",
-                "Zahlenanalyse", "System-Center PRO",
-                "Objektordner-Prüfung", "Berechtigungen & Protokoll",
-                "Einstellungen",
+                "Berichte & Export PRO", "Analyse-Center", "Zahlenanalyse",
+                "System-Center PRO", "Objektordner-Prüfung", "Einstellungen",
             ]),
         ]
 
@@ -10892,17 +15837,8 @@ class MainWindow(QMainWindow):
                 self._add_nav_button(title)
                 used_titles.add(title)
 
-        remaining = [title for title in self.titles if title not in used_titles]
-        if remaining:
-            group_label = QLabel("WEITERE BEREICHE")
-            group_label.setStyleSheet(
-                "color:#7ea1cc; font-size:10px; font-weight:900;"
-                "padding:12px 20px 4px 20px; letter-spacing:1px;"
-            )
-            self.nav_layout.addWidget(group_label)
-
-            for title in remaining:
-                self._add_nav_button(title)
+        # Absichtlich kein automatischer Block „Weitere Bereiche“ mehr:
+        # dadurch tauchen alte, doppelte Cockpits und Übergangsseiten nicht erneut auf.
 
         self.nav_layout.addStretch()
 
@@ -10947,7 +15883,12 @@ class MainWindow(QMainWindow):
             "Smart Startseite": "✨",
             "Objektgalerie": "🗃",
             "Enterprise Objekt 360°": "🌐",
+            "Digitaler Gebäudezwilling": "🏙",
+            "Enterprise Assistant": "🤖",
+            "Projektmonitor": "📡",
+            "Dokumentenvorschau": "👁",
             "Dokumenten-Center 2.0": "📚",
+            "Dokumentenautomatisierung PRO": "🧠",
             "Workflow-Regeln PRO": "⚙",
             "Dashboard": "⌂",
             "Verwaltungsleitstand 5.0": "🚀",
@@ -10973,9 +15914,15 @@ class MainWindow(QMainWindow):
             "Fristenmanager PRO": "⏰",
             "Workflow-Center PRO": "⚡",
             "Mein Arbeitstag": "📌",
+ ##           "Mobiles Mitarbeiterportal": "📱",
+            "DBS Field Import": "📦",
+            "DBS Field Datenimport": "📥",
+            "DBS Field Kalenderimport": "📅",
+            "DBS Field Eingangszentrale": "📥",
             "Kalender & Planung": "📅",
+            "Termine": "📆",
             "Objektordner-Prüfung": "🔎",
-            "Berechtigungen & Protokoll": "🔐",
+ ##            "Berechtigungen & Protokoll": "🔐",
             "Jahresprüfung PRO": "✅",
             "Einstellungen": "⚙",
             "Globale Suche": "⌕",
@@ -11062,12 +16009,17 @@ class MainWindow(QMainWindow):
             "Verwaltungsleitstand 5.0",
             "Mein Arbeitstag",
             "Kalender & Planung",
+            "Mobiles Mitarbeiterportal",
+            "DBS Field Import",
+            "DBS Field Eingangszentrale",
+            "DBS Field Kalenderimport",
             "Neue Aufgabe",
             "Neue Frist",
             "Neue Rechnung",
             "Neuer Mieter",
             "Neues Objekt",
             "Belegscanner PRO",
+            "Dokumentenautomatisierung PRO",
             "Kontoauszug-Import",
             "Backup erstellen",
             "Einstellungen",
@@ -11132,6 +16084,19 @@ class MainWindow(QMainWindow):
             "Akten": "Aktenstruktur",
             "Offene Rechnungen": "Rechnungen",
             "Offene Forderungen": "Mahnwesen",
+            # Kompatibilitätsweiterleitungen für ausgeblendete, redundante Einstiege.
+            "Dashboard": "Smart Startseite",
+            "Objektgalerie": "Enterprise Objekt 360°",
+            "Smart Objektakte": "Enterprise Objekt 360°",
+            "Enterprise Assistant": "Verwaltungsleitstand 5.0",
+            "Projektmonitor": "Verwaltungsleitstand 5.0",
+            "Dokumentenvorschau": "Dokumenten-Center 2.0",
+            "Dokumentenautomatisierung PRO": "Dokumenten-Center 2.0",
+            "Workflow-Regeln PRO": "Arbeitsorganisation PRO",
+            "Workflow-Center PRO": "Arbeitsorganisation PRO",
+            "Fristenmanager PRO": "Fristen",
+            "Verwaltungs-Cockpit": "Verwaltungsleitstand 5.0",
+            "Objekt-Cockpit": "Enterprise Objekt 360°",
         }
         target = mapping.get(title, title)
 
