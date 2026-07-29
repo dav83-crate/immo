@@ -1,8 +1,6 @@
 # 🏢 ImmoVerwaltung Professional
 
-```{=html}
-<p align="center">
-```
+
 # Digitale Immobilienverwaltung auf professionellem Niveau
 
 **Eine moderne Desktop-Anwendung zur Verwaltung von Immobilien,
