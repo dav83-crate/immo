@@ -1,119 +1,144 @@
 # 🏢 ImmoVerwaltung Professional
 
+```{=html}
+<p align="center">
+```
+# Die All-in-One-Lösung für Immobilienverwaltung, Buchhaltung und Lohnabrechnung
 
-# Digitale Immobilienverwaltung auf professionellem Niveau
-
-**Eine moderne Desktop-Anwendung zur Verwaltung von Immobilien,
-Wohnungen, Mietern, Finanzen und Dokumenten -- entwickelt mit Python &
-PySide6.**
+**ImmoVerwaltung Professional** vereint die Verwaltung von Immobilien,
+Finanzen, Personal und Dokumenten in einer einzigen Desktop-Anwendung.
+Entwickelt mit **Python** und **PySide6**, speichert die Software alle
+Daten lokal und benötigt keine Datenbank.
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![PySide6](https://img.shields.io/badge/PySide6-Qt6-41CD52?logo=qt&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue)
 ![License](https://img.shields.io/badge/License-MIT-success)
-![Status](https://img.shields.io/badge/Status-Active-brightgreen)
 
-
-
-------------------------------------------------------------------------
-
-## ✨ Highlights
-
--   🏢 Verwaltung beliebig vieler Immobilien
--   🏠 Wohnungen und Mieter
--   👤 Vermieterverwaltung
--   💰 Betriebskosten und Finanzcenter
--   📄 Integriertes Dokumentenmanagement
--   📎 PDF-Uploads für Verträge, Rechnungen und Unterlagen
--   🖼️ Objektbilder und Digitaler Gebäudezwilling
--   📊 Dashboard mit Live-Kennzahlen
--   🔍 Analyse-Center mit tabellenübergreifender Suche
--   💾 Excel-basierte Datenspeicherung
--   🔐 Lokale Speicherung ohne Datenbank
--   ♻️ Backup-System
-
-------------------------------------------------------------------------
-
-
-# 🚀 Funktionen
-
-## 🏢 Objektverwaltung
-
--   Objekte
--   Baujahr
--   Grundstücksfläche
--   Vermieter
--   Vermieter-E-Mail
--   Objektstatus
--   Grundrisse (PDF)
--   HV-Verträge (PDF)
--   Objektunterlagen
--   Objektordner
-
-## 🏠 Wohnungsverwaltung
-
--   Wohnungen
--   Etage
--   Zimmer
--   Wohnfläche
--   Wohnungsordner
--   Status
-
-## 👤 Mieterverwaltung
-
--   Mietverträge
--   Kaltmiete
--   Nebenkosten
--   Heizkosten
--   Mietstatus
-
-## 💰 Finanzverwaltung
-
--   Rechnungen
--   Zahlungen
--   Mahnwesen
--   Betriebskosten
--   Versicherungen
--   Grundsteuer
-
-## 🖼️ Digitaler Gebäudezwilling
-
--   Objektübersicht
--   Wohnungen
--   Mieter
--   Objektbilder
--   Bildgalerie
--   Direkte Zuordnung aller Daten
-
-## 📄 Dokumentenmanagement
-
--   PDF-Verträge
--   Rechnungen
--   Abrechnungen
--   Kontoauszüge
--   Übergabeprotokolle
-
-------------------------------------------------------------------------
-
-# 🗂 Projektstruktur
-
-``` text
-ImmoVerwaltung/
-├── assets/
-├── daten/
-├── dokumente/
-├── exports/
-├── akten/
-├── backups/
-├── feedback/
-├── main.py
-├── config.json
-└── README.md
+```{=html}
+</p>
 ```
 
 ------------------------------------------------------------------------
 
-# ⚙️ Installation
+# ✨ Hauptfunktionen
+
+## 🏠 Immobilienverwaltung
+
+-   Objektverwaltung
+-   Wohnungsverwaltung
+-   Vermieterverwaltung
+-   Mieterverwaltung
+-   Digitaler Gebäudezwilling
+-   Objektbilder
+-   Dokumentenmanagement
+-   Grundrisse und HV-Verträge (PDF)
+-   Betriebskosten
+-   Nebenkostenabrechnung
+-   Dienstleisterverwaltung
+-   Vertragsverwaltung
+-   Wiedervorlagen
+-   Objektakten
+
+------------------------------------------------------------------------
+
+## 💰 Buchhaltung
+
+Die integrierte Buchhaltung ist ein eigenständiger Bestandteil der
+Software.
+
+### Funktionen
+
+-   Einnahmen & Ausgaben
+-   Buchungserfassung
+-   Kontenverwaltung
+-   Kostenstellen
+-   Offene Posten
+-   Rechnungsverwaltung
+-   Zahlungseingänge
+-   Zahlungsüberwachung
+-   Mahnwesen
+-   Finanzübersichten
+-   Jahresauswertungen
+-   Exportfunktionen
+-   Belegverwaltung
+-   PDF-Ablage
+
+------------------------------------------------------------------------
+
+## 👥 Lohnabrechnung
+
+Die Software enthält eine vollständige Lohnverwaltung.
+
+### Funktionen
+
+-   Mitarbeiterverwaltung
+-   Personalstammdaten
+-   Lohn- und Gehaltsabrechnung
+-   Zuschläge
+-   Abzüge
+-   Arbeitszeiten
+-   Urlaub
+-   Krankheit
+-   Lohnjournal
+-   Monatsabrechnungen
+-   Jahresübersichten
+-   Auswertungen
+
+------------------------------------------------------------------------
+
+## 📊 Dashboard & Analyse
+
+-   Live-Kennzahlen
+-   Objektübersichten
+-   Finanzübersichten
+-   Personalauswertungen
+-   Volltextsuche
+-   Analyse-Center
+-   Statistiken
+
+------------------------------------------------------------------------
+
+## 📄 Dokumentenmanagement
+
+-   PDF-Dokumente
+-   Rechnungen
+-   Verträge
+-   Kontoauszüge
+-   Übergabeprotokolle
+-   Objektunterlagen
+-   Personalunterlagen
+-   Bildverwaltung
+
+------------------------------------------------------------------------
+
+# 🛠 Technologien
+
+-   Python
+-   PySide6 (Qt6)
+-   OpenPyXL
+-   pypdf
+-   JSON
+-   pathlib
+-   ZIP-Backup
+
+------------------------------------------------------------------------
+
+# 💾 Datenhaltung
+
+Alle Daten werden lokal gespeichert:
+
+-   Excel (.xlsx)
+-   PDF
+-   Bilder
+-   JSON
+-   ZIP-Backups
+
+**Keine Datenbank erforderlich. Keine Cloud-Pflicht.**
+
+------------------------------------------------------------------------
+
+# 🚀 Installation
 
 ``` bash
 git clone https://github.com/DEIN-GITHUB-NAME/ImmoVerwaltung.git
@@ -122,33 +147,15 @@ pip install -r requirements.txt
 python main.py
 ```
 
-Oder:
-
-``` bash
-pip install PySide6 openpyxl pypdf
-python main.py
-```
-
 ------------------------------------------------------------------------
 
-# 🛠️ Technologie
+# 📈 Roadmap
 
--   Python
--   PySide6 (Qt6)
--   OpenPyXL
--   pypdf
--   JSON
--   pathlib
-
-------------------------------------------------------------------------
-
-# 🛣️ Roadmap
-
--   Outlook-Anbindung
--   OCR für Rechnungen
+-   Outlook-Integration
+-   OCR
 -   KI-gestützte Dokumentenerkennung
 -   Mobile App
--   Cloud-Synchronisation (optional)
+-   Optionale Cloud-Synchronisation
 -   Mehrbenutzerbetrieb
 
 ------------------------------------------------------------------------
@@ -161,7 +168,8 @@ MIT License
 
 # 👨‍💻 Entwickler
 
-**David Dornheim**
+**DBS Hausverwaltung**
 
-Entwickelt für eine moderne, digitale und effiziente
-Immobilienverwaltung.
+Eine professionelle Komplettlösung für Hausverwaltungen, Vermieter und
+Immobilienunternehmen -- mit Immobilienverwaltung, Buchhaltung und
+Lohnabrechnung in einer einzigen Anwendung.
