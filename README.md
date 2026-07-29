@@ -36,22 +36,6 @@ PySide6.**
 
 ------------------------------------------------------------------------
 
-# 📸 Screenshots
-
-> Füge später Bilder unter `docs/images/` ein.
-
-  -----------------------------------------------------------------------------------
-  Dashboard                        Digitaler Gebäudezwilling
-  -------------------------------- --------------------------------------------------
-  ![](docs/images/dashboard.png)   ![](docs/images/gebaeudezwilling.png)
-
-  -----------------------------------------------------------------------------------
-
-  Objektverwaltung               Finanzcenter
-  ------------------------------ -------------------------------
-  ![](docs/images/objekte.png)   ![](docs/images/finanzen.png)
-
-------------------------------------------------------------------------
 
 # 🚀 Funktionen
 
@@ -179,7 +163,7 @@ MIT License
 
 # 👨‍💻 Entwickler
 
-**DBS Hausverwaltung**
+**David Dornheim**
 
 Entwickelt für eine moderne, digitale und effiziente
 Immobilienverwaltung.
