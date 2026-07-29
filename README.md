@@ -1,8 +1,6 @@
 # 🏢 ImmoVerwaltung Professional
 
-```{=html}
-<p align="center">
-```
+
 # Die All-in-One-Lösung für Immobilienverwaltung, Buchhaltung und Lohnabrechnung
 
 **ImmoVerwaltung Professional** vereint die Verwaltung von Immobilien,
@@ -15,9 +13,6 @@ Daten lokal und benötigt keine Datenbank.
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue)
 ![License](https://img.shields.io/badge/License-MIT-success)
 
-```{=html}
-</p>
-```
 
 ------------------------------------------------------------------------
 
@@ -168,7 +163,7 @@ MIT License
 
 # 👨‍💻 Entwickler
 
-**DBS Hausverwaltung**
+**David Dornheim**
 
 Eine professionelle Komplettlösung für Hausverwaltungen, Vermieter und
 Immobilienunternehmen -- mit Immobilienverwaltung, Buchhaltung und
