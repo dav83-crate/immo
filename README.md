@@ -13,9 +13,7 @@ PySide6.**
 ![License](https://img.shields.io/badge/License-MIT-success)
 ![Status](https://img.shields.io/badge/Status-Active-brightgreen)
 
-```{=html}
-</p>
-```
+
 
 ------------------------------------------------------------------------
 
