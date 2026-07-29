@@ -1,73 +1,187 @@
-# ImmoVerwaltung
+# 🏢 ImmoVerwaltung Professional
 
-**Aktueller Entwicklungsstand: Version 6.0 Enterprise Foundation mit dazugehöriger Mitarbeiterapp für Zeiterfassung und Schädensmeldung**
+```{=html}
+<p align="center">
+```
+# Digitale Immobilienverwaltung auf professionellem Niveau
 
-Windows-Desktopanwendung für Immobilien-, Mieter-, Dokumenten-, Aufgaben-, Fristen- und Finanzverwaltung.
+**Eine moderne Desktop-Anwendung zur Verwaltung von Immobilien,
+Wohnungen, Mietern, Finanzen und Dokumenten -- entwickelt mit Python &
+PySide6.**
 
-## Schwerpunkte
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![PySide6](https://img.shields.io/badge/PySide6-Qt6-41CD52?logo=qt&logoColor=white)
+![Platform](https://img.shields.io/badge/Platform-Windows-blue)
+![License](https://img.shields.io/badge/License-MIT-success)
+![Status](https://img.shields.io/badge/Status-Active-brightgreen)
 
-- Objekt-, Wohnungs- und Mieterverwaltung
-- Rechnungen, Betriebskosten und Buchhaltung
-- PDF-Import für Kontoauszüge und Belege
-- Objektordner als zentraler Beziehungsschlüssel
-- Mitarbeiter-Login, Rollen und Rechte
-- Kalender, Aufgaben, Fristen und Workflow-Center
-- Smart Objektakte, Objektgalerie und Verwaltungsleitstand
-- Berichte, Backups und Systemprüfung
-- Offline-Betrieb mit bestehender Beta-Excelstruktur
+```{=html}
+</p>
+```
 
-## Voraussetzungen
+------------------------------------------------------------------------
 
-- Windows 10 oder Windows 11
-- Python 3.11 oder neuer
+## ✨ Highlights
 
-## Installation
+-   🏢 Verwaltung beliebig vieler Immobilien
+-   🏠 Wohnungen und Mieter
+-   👤 Vermieterverwaltung
+-   💰 Betriebskosten und Finanzcenter
+-   📄 Integriertes Dokumentenmanagement
+-   📎 PDF-Uploads für Verträge, Rechnungen und Unterlagen
+-   🖼️ Objektbilder und Digitaler Gebäudezwilling
+-   📊 Dashboard mit Live-Kennzahlen
+-   🔍 Analyse-Center mit tabellenübergreifender Suche
+-   💾 Excel-basierte Datenspeicherung
+-   🔐 Lokale Speicherung ohne Datenbank
+-   ♻️ Backup-System
 
-```powershell
-py -m venv .venv
-.venv\Scripts\activate
+------------------------------------------------------------------------
+
+# 📸 Screenshots
+
+> Füge später Bilder unter `docs/images/` ein.
+
+  -----------------------------------------------------------------------------------
+  Dashboard                        Digitaler Gebäudezwilling
+  -------------------------------- --------------------------------------------------
+  ![](docs/images/dashboard.png)   ![](docs/images/gebaeudezwilling.png)
+
+  -----------------------------------------------------------------------------------
+
+  Objektverwaltung               Finanzcenter
+  ------------------------------ -------------------------------
+  ![](docs/images/objekte.png)   ![](docs/images/finanzen.png)
+
+------------------------------------------------------------------------
+
+# 🚀 Funktionen
+
+## 🏢 Objektverwaltung
+
+-   Objekte
+-   Baujahr
+-   Grundstücksfläche
+-   Vermieter
+-   Vermieter-E-Mail
+-   Objektstatus
+-   Grundrisse (PDF)
+-   HV-Verträge (PDF)
+-   Objektunterlagen
+-   Objektordner
+
+## 🏠 Wohnungsverwaltung
+
+-   Wohnungen
+-   Etage
+-   Zimmer
+-   Wohnfläche
+-   Wohnungsordner
+-   Status
+
+## 👤 Mieterverwaltung
+
+-   Mietverträge
+-   Kaltmiete
+-   Nebenkosten
+-   Heizkosten
+-   Mietstatus
+
+## 💰 Finanzverwaltung
+
+-   Rechnungen
+-   Zahlungen
+-   Mahnwesen
+-   Betriebskosten
+-   Versicherungen
+-   Grundsteuer
+
+## 🖼️ Digitaler Gebäudezwilling
+
+-   Objektübersicht
+-   Wohnungen
+-   Mieter
+-   Objektbilder
+-   Bildgalerie
+-   Direkte Zuordnung aller Daten
+
+## 📄 Dokumentenmanagement
+
+-   PDF-Verträge
+-   Rechnungen
+-   Abrechnungen
+-   Kontoauszüge
+-   Übergabeprotokolle
+
+------------------------------------------------------------------------
+
+# 🗂 Projektstruktur
+
+``` text
+ImmoVerwaltung/
+├── assets/
+├── daten/
+├── dokumente/
+├── exports/
+├── akten/
+├── backups/
+├── feedback/
+├── main.py
+├── config.json
+└── README.md
+```
+
+------------------------------------------------------------------------
+
+# ⚙️ Installation
+
+``` bash
+git clone https://github.com/DEIN-GITHUB-NAME/ImmoVerwaltung.git
+cd ImmoVerwaltung
 pip install -r requirements.txt
 python main.py
 ```
 
-Alternativ kann unter Windows `STARTEN.bat` verwendet werden.
+Oder:
 
-## EXE erstellen
-
-```powershell
-EXE_ERSTELLEN.bat
+``` bash
+pip install PySide6 openpyxl pypdf
+python main.py
 ```
 
-Das Logo und das Windows-Icon werden aus `assets/` eingebettet. Eine alternative Erstellung über die Spec-Datei ist mit `EXE_ERSTELLEN_MIT_SPEC.bat` möglich.
+------------------------------------------------------------------------
 
-## Daten und Datenschutz
+# 🛠️ Technologie
 
-Produktive Excel-Dateien im Ordner `daten/`, lokale Konfigurationen, Backups und Exporte sind über `.gitignore` ausgeschlossen. Diese Dateien dürfen nicht in ein öffentliches Repository eingecheckt werden.
+-   Python
+-   PySide6 (Qt6)
+-   OpenPyXL
+-   pypdf
+-   JSON
+-   pathlib
 
-## Zentrale Entwicklungsregeln
+------------------------------------------------------------------------
 
-- Die bestehende Beta-Excelstruktur bleibt unverändert.
-- Objektordner bleiben der zentrale Beziehungsschlüssel.
-- Neue Versionen müssen abwärtskompatibel bleiben.
-- Die Navigationsschriftfarbe `#f00000` wird beibehalten.
+# 🛣️ Roadmap
 
-## Dokumentation
+-   Outlook-Anbindung
+-   OCR für Rechnungen
+-   KI-gestützte Dokumentenerkennung
+-   Mobile App
+-   Cloud-Synchronisation (optional)
+-   Mehrbenutzerbetrieb
 
-Weitere Hinweise befinden sich in `docs/`, im Benutzerhandbuch und im `CHANGELOG.md`.
+------------------------------------------------------------------------
 
-## Lizenz
+# 📄 Lizenz
 
-Proprietär. Alle Rechte vorbehalten. Siehe `LICENSE`.
+MIT License
 
+------------------------------------------------------------------------
 
-## Version 6.0
+# 👨‍💻 Entwickler
 
-Enterprise Objekt 360°, Dokumenten-Center 2.0 und Workflow-Regeln PRO.
+**DBS Hausverwaltung**
 
-⚠️ Copyright Notice
-
-Dieses Repository dient ausschließlich der Dokumentation und Entwicklung.
-
-Das Kopieren, Verwenden oder Weiterentwickeln des Quellcodes außerhalb einer ausdrücklich schriftlich erteilten Genehmigung ist nicht gestattet.
-
-Alle Rechte verbleiben bei David Dornheim.
+Entwickelt für eine moderne, digitale und effiziente
+Immobilienverwaltung.
